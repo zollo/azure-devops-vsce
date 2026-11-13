@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Lint, test and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Integration tests (VS Code 1.101)
+        run: xvfb-run -a npm run test:integration
+
+      - name: Package VSIX
+        run: npx --yes @vscode/vsce package --out ado-boards-${{ github.sha }}.vsix
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: '*.vsix'
+          if-no-files-found: error
+          retention-days: 14

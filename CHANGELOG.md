@@ -14,6 +14,7 @@ First release of **ADO Boards**, the community-maintained fork of Azure DevOps B
 - Renamed to **ADO Boards** and moved to a new Marketplace publisher and the [zollo/azure-devops-vsce](https://github.com/zollo/azure-devops-vsce) repository
 - Personal Access Tokens are now stored in VS Code SecretStorage and migrated out of settings automatically
 - README, LICENSE and package metadata now credit the original author
+- CI on every pull request (lint, unit tests, VS Code smoke tests, packaging), CodeQL scanning, Dependabot, and a tag-driven release workflow that publishes the GitHub Release and the Marketplace listing from the same VSIX
 - The extension is now bundled with esbuild into a single file; the package no longer ships `node_modules` (about 495 KB, down from 8.8 MB in 0.2.8)
 
 ### Removed

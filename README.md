@@ -3,6 +3,7 @@
 [![VS Code Extension](https://img.shields.io/badge/VS%20Code-Extension-007ACC?style=flat&logo=visual-studio-code)](https://marketplace.visualstudio.com/)
 [![TypeScript](https://img.shields.io/badge/Built%20with-TypeScript-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
+[![CI](https://github.com/zollo/azure-devops-vsce/actions/workflows/ci.yml/badge.svg)](https://github.com/zollo/azure-devops-vsce/actions/workflows/ci.yml)
 
 Manage your Azure DevOps Boards, work items, sprints, and backlogs directly from Visual Studio Code. Plan, track, and collaborate on your projects without leaving your editor.
 
@@ -206,13 +207,7 @@ For issues, feature requests, or contributions, please visit the [GitHub reposit
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks and conventions; for larger changes, please open an issue first. To report a security problem, see [SECURITY.md](SECURITY.md).
 
 ## Credits
 

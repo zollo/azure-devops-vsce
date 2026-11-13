@@ -1,0 +1,25 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+    ignore:
+      # Must match engines.vscode (the minimum supported VS Code); bump both together.
+      - dependency-name: '@types/vscode'
+      # Node 22 is what VS Code 1.101 ships.
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
+      # Quill 2 changes the HTML saved to Azure DevOps; upgrade deliberately.
+      - dependency-name: quill
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

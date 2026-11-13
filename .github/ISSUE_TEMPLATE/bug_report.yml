@@ -1,0 +1,51 @@
+name: Bug report
+description: Something in ADO Boards isn't working
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Please don't include tokens, organization URLs or work item content you can't share publicly. For security problems, use the Security tab instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the board for ...
+        2. Drag a card to ...
+  - type: input
+    id: extension-version
+    attributes:
+      label: ADO Boards version
+      placeholder: e.g. 0.3.0
+    validations:
+      required: true
+  - type: input
+    id: vscode-version
+    attributes:
+      label: VS Code version and OS
+      placeholder: e.g. 1.106.0 on macOS 26
+    validations:
+      required: true
+  - type: dropdown
+    id: auth
+    attributes:
+      label: Sign-in method
+      options: [Microsoft account (OAuth), Personal Access Token]
+  - type: dropdown
+    id: host
+    attributes:
+      label: Organization URL style
+      options: [dev.azure.com, '*.visualstudio.com', Azure DevOps Server (on-premises)]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Output from View → Output → "Azure DevOps", with anything sensitive removed.
+      render: text
