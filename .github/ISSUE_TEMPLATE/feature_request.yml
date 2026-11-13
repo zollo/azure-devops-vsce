@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest an improvement to ADO Boards
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The workflow or problem, rather than the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you've tried or considered?
