@@ -898,7 +898,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                     fieldValue = null; // Will use remove operation
                 }
                 break;
-            case 'sprint':
+            case 'sprint': {
                 // Need to get the full iteration path
                 fieldPath = '/fields/System.IterationPath';
                 // For sprint, we need the full path, try to find it
@@ -921,6 +921,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                     fieldValue = null;
                 }
                 break;
+            }
             case 'type':
                 // Cannot change work item type via simple field update
                 vscode.window.showWarningMessage('Cannot change work item type via drag and drop');

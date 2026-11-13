@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { vendorAssetUri } from '../utils/webviewAssets';
+import { extractWorkItemIdFromUrl } from '../utils/workItemUrls';
 import { jsArg, safeCssColor, serializeForScript, webviewCsp } from '../utils/webviewSecurity';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItemEventManager } from '../events/workItemEventManager';
@@ -208,7 +210,7 @@ export class BoardPanel {
                     case 'showInfo':
                         vscode.window.showInformationMessage(message.text);
                         break;
-                    case 'getCurrentUser':
+                    case 'getCurrentUser': {
                         const currentUser = await this.authenticationManager.getCurrentUser();
                         // Try multiple fields to find the user's email/uniqueName
                         const userEmail = currentUser?.uniqueName
@@ -226,6 +228,7 @@ export class BoardPanel {
                             email: userEmail
                         });
                         break;
+                    }
                     case 'saveFilterState':
                         this._filterState = message.filterState || {};
                         break;
@@ -1219,9 +1222,8 @@ export class BoardPanel {
                             // More robust URL parsing - handles both dev.azure.com and visualstudio.com
                             // URLs can be: https://dev.azure.com/org/_apis/wit/workitems/123
                             //          or: https://org.visualstudio.com/_apis/wit/workitems/123
-                            const match = rel.url.match(/\/workitems\/(\d+)/i) || rel.url.match(/\/(\d+)$/);
-                            if (match && match[1]) {
-                                const childId = match[1];
+                            const childId = extractWorkItemIdFromUrl(rel.url);
+                            if (childId) {
                                 allChildIds.add(childId);
                                 childIds.push(childId);
                                 outputChannel.appendLine(`[Board] ✓ Extracted child ID: ${childId}`);
@@ -1261,13 +1263,13 @@ export class BoardPanel {
                             // Extract project GUID or name from URL
                             // Format: https://crate.visualstudio.com/0eab1257.../Experian%20Verifications/_apis/wit/workItems/123
                             // or: https://dev.azure.com/org/Project/_apis/wit/workItems/123
-                            const urlMatch = rel.url.match(/\.com\/([^\/]+)\/([^\/]+)\/_apis/);
+                            const urlMatch = rel.url.match(/\.com\/([^/]+)\/([^/]+)\/_apis/);
                             if (urlMatch && urlMatch[2]) {
                                 projectName = urlMatch[2];
                                 outputChannel.appendLine(`[Board] Extracted project identifier from child URL: "${projectName}"`);
                             } else {
                                 // Fallback: single segment before /_apis
-                                const simpleMatch = rel.url.match(/\.com\/([^\/]+)\/_apis/);
+                                const simpleMatch = rel.url.match(/\.com\/([^/]+)\/_apis/);
                                 if (simpleMatch && simpleMatch[1]) {
                                     projectName = simpleMatch[1];
                                     outputChannel.appendLine(`[Board] Extracted project identifier (simple): "${projectName}"`);
@@ -2491,9 +2493,7 @@ export class BoardPanel {
         const allWorkItemTypes = Array.from(new Set([...boardTypes, ...this._projectWorkItemTypes])).sort();
 
         // Get the codicon font URI from VSCode
-        const codiconFontUri = this._panel.webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.ttf')
-        );
+        const codiconFontUri = vendorAssetUri(this._panel.webview, this._extensionUri, 'codicons', 'codicon.ttf');
 
         return `<!DOCTYPE html>
 <html lang="en">

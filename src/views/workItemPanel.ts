@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { vendorAssetUri } from '../utils/webviewAssets';
 import { jsArg, sanitizeRichText, serializeForScript, webviewCsp } from '../utils/webviewSecurity';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem } from '../models/workItem';
@@ -1052,9 +1053,8 @@ export class WorkItemPanel {
     }
 
     private _getHtmlForWebview(comments: any[] = [], linkedItems: any[] = [], attachments: any[] = [], currentUser: any = null): string {
-        const quillDist = vscode.Uri.joinPath(this._extensionUri, 'node_modules', 'quill', 'dist');
-        const quillCssUri = this._panel.webview.asWebviewUri(vscode.Uri.joinPath(quillDist, 'quill.snow.css'));
-        const quillJsUri = this._panel.webview.asWebviewUri(vscode.Uri.joinPath(quillDist, 'quill.min.js'));
+        const quillCssUri = vendorAssetUri(this._panel.webview, this._extensionUri, 'quill', 'quill.snow.css');
+        const quillJsUri = vendorAssetUri(this._panel.webview, this._extensionUri, 'quill', 'quill.min.js');
         if (!this._workItem) return '<html><body><p>No work item loaded</p></body></html>';
 
         const fields = this._workItem.fields;
