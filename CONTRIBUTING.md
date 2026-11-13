@@ -35,10 +35,11 @@ CI runs the same checks on every pull request.
 ## Releasing (maintainers)
 
 1. Update `version` in `package.json` and move the `Unreleased` CHANGELOG entry under that version
-   with today's date.
+   with today's date, as `## [X.Y.Z] - YYYY-MM-DD` (the Release workflow checks for this).
 2. Update the What's New panel (`src/views/whatsNewPanel.ts`) and its `LATEST_ANNOUNCEMENT_ID`.
 3. Merge to `main`, then push a tag `vX.Y.Z`. The Release workflow builds the VSIX, creates the
    GitHub Release and publishes to the Marketplace (see `.github/workflows/release.yml` for setup).
+   If a publish step fails, re-run the workflow: it reuses the existing GitHub Release and its VSIX.
 
 ## License
 

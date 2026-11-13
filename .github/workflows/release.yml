@@ -59,11 +59,10 @@ jobs:
           if [ "$PUBLISHER" = "publisher-tbd" ]; then
             echo "::error::Set the real Marketplace publisher ID in package.json before releasing"; exit 1
           fi
-          if ! grep -q "^## \[$VERSION\]" CHANGELOG.md; then
-            echo "::error::CHANGELOG.md has no '## [$VERSION]' entry"; exit 1
-          fi
-          if grep -q "^## \[$VERSION\] - Unreleased" CHANGELOG.md; then
-            echo "::error::CHANGELOG.md still marks $VERSION as Unreleased"; exit 1
+          # Require a dated entry such as "## [0.3.0] - 2026-12-01" (dots escaped for the regex).
+          VERSION_RE=$(printf '%s' "$VERSION" | sed 's/[.]/\\./g')
+          if ! grep -qE "^## \[$VERSION_RE\] - [0-9]{4}-[0-9]{2}-[0-9]{2}\s*$" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md needs a dated '## [$VERSION] - YYYY-MM-DD' entry"; exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "vsix=ado-boards-$VERSION.vsix" >> "$GITHUB_OUTPUT"
@@ -93,17 +92,28 @@ jobs:
         with:
           name: vsix
 
+      # Safe to re-run: if a release for this tag already exists, keep it and its VSIX as they
+      # are, so a retry after a failed publish job never replaces an already released file.
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
           VSIX: ${{ needs.build.outputs.vsix }}
         run: |
-          gh release create "$TAG" "$VSIX" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "ADO Boards $TAG" \
-            --notes "See [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/$TAG/CHANGELOG.md) for details. ADO Boards is a community fork of Azure DevOps Boards by Damilola Onadeinde." \
-            --verify-tag
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qxF "$VSIX"; then
+              echo "::notice::Release $TAG already has $VSIX; reusing it."
+            else
+              echo "::notice::Release $TAG exists without $VSIX; attaching it."
+              gh release upload "$TAG" "$VSIX" --repo "$GITHUB_REPOSITORY"
+            fi
+          else
+            gh release create "$TAG" "$VSIX" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "ADO Boards $TAG" \
+              --notes "See [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/$TAG/CHANGELOG.md) for details. ADO Boards is a community fork of Azure DevOps Boards by Damilola Onadeinde." \
+              --verify-tag
+          fi
 
   marketplace:
     name: Publish to VS Code Marketplace
@@ -114,9 +124,12 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: vsix
+      # Publish the exact file attached to the GitHub Release (it may come from an earlier run).
+      - name: Download VSIX from the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "${{ needs.build.outputs.vsix }}"
 
       - uses: actions/setup-node@v5
         with:
@@ -149,10 +162,15 @@ jobs:
     needs: [build, github-release]
     runs-on: ubuntu-latest
     environment: marketplace
+    permissions:
+      contents: read
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: vsix
+      # Publish the exact file attached to the GitHub Release (it may come from an earlier run).
+      - name: Download VSIX from the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "${{ needs.build.outputs.vsix }}"
 
       - uses: actions/setup-node@v5
         with:
