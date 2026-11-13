@@ -53,9 +53,17 @@ jobs:
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
-            git fetch --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
-            git checkout --detach "$TAG"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            # Exit status 2 means "no such tag"; any other failure must stop the run, so a
+            # lookup error never releases the dispatch commit under an existing tag.
+            status=0
+            git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null || status=$?
+            if [ "$status" -eq 0 ]; then
+              git fetch --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+              git checkout --detach "$TAG"
+            elif [ "$status" -ne 2 ]; then
+              echo "::error::Could not look up tag $TAG (git ls-remote exit $status)"; exit 1
+            fi
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
