@@ -3,7 +3,7 @@
   "displayName": "ADO Boards",
   "description": "Unofficial, community-maintained Azure DevOps Boards integration for VS Code. Manage work items, boards, sprints and backlogs without leaving your editor.",
   "version": "0.3.0",
-  "publisher": "publisher-tbd",
+  "publisher": "zollo",
   "author": {
     "name": "Joe Zollo",
     "url": "https://github.com/zollo"
