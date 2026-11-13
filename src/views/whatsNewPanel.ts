@@ -10,7 +10,7 @@ export class WhatsNewPanel {
     private disposables: vscode.Disposable[] = [];
 
     // Current announcement ID - UPDATE THIS FOR EACH NEW RELEASE
-    public static readonly LATEST_ANNOUNCEMENT_ID = 'feb-2026-v0.2.8-expandable-checklist';
+    public static readonly LATEST_ANNOUNCEMENT_ID = 'nov-2026-v0.3.0-ado-boards';
 
     private constructor(
         panel: vscode.WebviewPanel,
@@ -811,8 +811,8 @@ export class WhatsNewPanel {
                                         </svg>
                                     </div>
                                     <div class="feature-text">
-                                        <h4>Expandable Child Work Items Checklist</h4>
-                                        <p>Interactive checklists for managing child items directly on board cards. Click bug/task indicators to expand, check off completed items, and add new children inline. Smooth animations and type-specific expansion.</p>
+                                        <h4>Welcome to ADO Boards</h4>
+                                        <p>Azure DevOps Boards by Damilola Onadeinde continues here as ADO Boards, a community-maintained fork. Your existing settings carry over.</p>
                                     </div>
                                     <div class="hover-dot"><div class="hover-dot-inner"></div></div>
                                 </div>
@@ -823,8 +823,8 @@ export class WhatsNewPanel {
                                         </svg>
                                     </div>
                                     <div class="feature-text">
-                                        <h4>Consistent Avatar Colors</h4>
-                                        <p>Avatar colors now consistent across main cards and child work item checklists. Each user gets a unique color based on their name with improved 18px sizing for child items.</p>
+                                        <h4>Choose How You Sign In</h4>
+                                        <p>Sign in with your Microsoft account (OAuth) or a Personal Access Token, whichever your organization allows.</p>
                                     </div>
                                     <div class="hover-dot"><div class="hover-dot-inner"></div></div>
                                 </div>
@@ -835,8 +835,8 @@ export class WhatsNewPanel {
                                         </svg>
                                     </div>
                                     <div class="feature-text">
-                                        <h4>Story Points & Child Items Fixed</h4>
-                                        <p>Story Points now display correctly on User Story cards. Child work items load properly with assignee information. Checkbox styling matches filter dropdowns perfectly.</p>
+                                        <h4>Safer Token Storage</h4>
+                                        <p>Personal Access Tokens are now kept in VS Code SecretStorage and are moved out of your settings automatically.</p>
                                     </div>
                                     <div class="hover-dot"><div class="hover-dot-inner"></div></div>
                                 </div>
@@ -851,7 +851,7 @@ export class WhatsNewPanel {
                                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 12.75c1.148 0 2.278.08 3.383.237 1.037.146 1.866.966 1.866 2.013 0 3.728-2.35 6.75-5.25 6.75S6.75 18.728 6.75 15c0-1.046.83-1.867 1.866-2.013A24.204 24.204 0 0112 12.75zm0 0c2.883 0 5.647.508 8.207 1.44a23.91 23.91 0 01-1.152 6.06M12 12.75c-2.883 0-5.647.508-8.208 1.44.125 2.104.52 4.136 1.153 6.06M12 12.75a2.25 2.25 0 002.248-2.354M12 12.75a2.25 2.25 0 01-2.248-2.354M12 8.25c.995 0 1.971-.08 2.922-.236.403-.066.74-.358.795-.762a3.778 3.778 0 00-.399-2.25M12 8.25c-.995 0-1.97-.08-2.922-.236-.402-.066-.74-.358-.795-.762a3.734 3.734 0 01.4-2.253M12 8.25a2.25 2.25 0 00-2.248 2.146M12 8.25a2.25 2.25 0 012.248 2.146M8.683 5a6.032 6.032 0 01-1.155-1.002c.07-.63.27-1.222.574-1.747m.581 2.749A3.75 3.75 0 0115.318 5m0 0c.427-.283.815-.62 1.155-.999a4.471 4.471 0 00-.575-1.752M4.921 6a24.048 24.048 0 00-.392 3.314c1.668.546 3.416.914 5.223 1.082M19.08 6c.205 1.08.337 2.187.392 3.314a23.882 23.882 0 01-5.223 1.082" />
                                     </svg>
                                 </div>
-                                <span class="section-title">Critical Fixes</span>
+                                <span class="section-title">Security</span>
                             </div>
                             <div class="section-content">
                                 <div class="feature-item fi-3">
@@ -861,8 +861,8 @@ export class WhatsNewPanel {
                                         </svg>
                                     </div>
                                     <div class="feature-text">
-                                        <h4>Board TreeView WIQL Fix</h4>
-                                        <p>Fixed work item loading using official Azure DevOps WIQL API. Query by System.State instead of undocumented System.BoardColumn with exact type+state matching.</p>
+                                        <h4>Hardened Webviews</h4>
+                                        <p>Work item text is sanitized before it is shown, the board views have a Content Security Policy, and vulnerable dependencies were upgraded.</p>
                                     </div>
                                     <div class="hover-dot"><div class="hover-dot-inner"></div></div>
                                 </div>
@@ -887,8 +887,8 @@ export class WhatsNewPanel {
                                         </svg>
                                     </div>
                                     <div class="feature-text">
-                                        <h4>Enhanced Status Bar</h4>
-                                        <p>Status bar now shows active work item tracking and Quick Open integration. Click to quickly access and search work items.</p>
+                                        <h4>Smaller, Faster Package</h4>
+                                        <p>The extension is now bundled into a single file, so the download is about 0.5 MB instead of 8.8 MB.</p>
                                     </div>
                                     <div class="hover-dot"><div class="hover-dot-inner"></div></div>
                                 </div>
@@ -900,8 +900,8 @@ export class WhatsNewPanel {
                                         </svg>
                                     </div>
                                     <div class="feature-text">
-                                        <h4>Automatic Smart Filtering</h4>
-                                        <p>Board TreeView automatically filters to show current sprint items assigned to you on first load. Better focus on your immediate work.</p>
+                                        <h4>AI Assistant Removed</h4>
+                                        <p>The disabled AI chat and its settings and commands are gone, so the Command Palette no longer lists commands that do nothing.</p>
                                     </div>
                                     <div class="hover-dot"><div class="hover-dot-inner"></div></div>
                                 </div>

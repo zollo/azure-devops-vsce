@@ -3,15 +3,13 @@ name: Release
 # Push a tag like v0.3.0 (matching package.json "version") to build the VSIX once,
 # attach it to a GitHub Release and publish the same file to the VS Code Marketplace.
 #
-# Setup (repository Settings):
-#   Environment "marketplace" (optionally with required reviewers) holding ONE of:
-#     - Microsoft Entra ID via OIDC (preferred, no long-lived token):
-#         variables AZURE_CLIENT_ID and AZURE_TENANT_ID for an app/managed identity with a
-#         federated credential for this repo's "marketplace" environment, added as a member
-#         of the Marketplace publisher.
-#     - or secret VSCE_PAT: Azure DevOps PAT, Organization "All accessible organizations",
-#         scope Marketplace (Manage).
-#   Optional secret OVSX_PAT to also publish to Open VSX (for VSCodium, Cursor and others).
+# Setup:
+#   Marketplace trusted publishing: on the publisher's page at
+#   https://marketplace.visualstudio.com/manage, add a GitHub Actions trusted publisher for
+#   this repository and the workflow file release.yml. No secret is needed; vsce exchanges
+#   the job's GitHub OIDC token for a short-lived Marketplace token (vsce publish --oidc).
+#   Optional: environment "marketplace" with required reviewers, to approve each publish.
+#   Optional secret OVSX_PAT (in that environment) to also publish to Open VSX.
 
 on:
   push:
@@ -135,27 +133,9 @@ jobs:
         with:
           node-version: 22
 
-      - name: Sign in to Azure (OIDC)
-        if: vars.AZURE_CLIENT_ID != ''
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          allow-no-subscriptions: true
-
-      - name: Publish with Entra ID
-        if: vars.AZURE_CLIENT_ID != ''
-        run: npx --yes @vscode/vsce publish --packagePath "${{ needs.build.outputs.vsix }}" --azure-credential
-
-      - name: Publish with PAT
-        if: vars.AZURE_CLIENT_ID == ''
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: |
-          if [ -z "$VSCE_PAT" ]; then
-            echo "::error::Configure AZURE_CLIENT_ID/AZURE_TENANT_ID variables or a VSCE_PAT secret in the marketplace environment"; exit 1
-          fi
-          npx --yes @vscode/vsce publish --packagePath "${{ needs.build.outputs.vsix }}"
+      # Needs vsce 4.1.1+ for --oidc. The trusted publisher matches this repo and release.yml.
+      - name: Publish with trusted publishing
+        run: npx --yes @vscode/vsce@4.1.1 publish --packagePath "${{ needs.build.outputs.vsix }}" --oidc
 
   open-vsx:
     name: Publish to Open VSX (optional)

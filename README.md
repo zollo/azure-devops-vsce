@@ -1,6 +1,6 @@
 # ADO Boards for VS Code
 
-[![VS Code Extension](https://img.shields.io/badge/VS%20Code-Extension-007ACC?style=flat&logo=visual-studio-code)](https://marketplace.visualstudio.com/)
+[![VS Code Extension](https://img.shields.io/badge/VS%20Code-Extension-007ACC?style=flat&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=zollo.azure-devops-boards)
 [![TypeScript](https://img.shields.io/badge/Built%20with-TypeScript-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
 [![CI](https://github.com/zollo/azure-devops-vsce/actions/workflows/ci.yml/badge.svg)](https://github.com/zollo/azure-devops-vsce/actions/workflows/ci.yml)
@@ -68,7 +68,7 @@ Manage your Azure DevOps Boards, work items, sprints, and backlogs directly from
 
 ### Installation
 
-1. Install the extension from the VS Code Marketplace
+1. Install [ADO Boards](https://marketplace.visualstudio.com/items?itemName=zollo.azure-devops-boards) from the VS Code Marketplace
 2. Click the Azure DevOps icon in the Activity Bar
 3. Click "Sign In" to authenticate with your Microsoft account
 4. Select your Azure DevOps organization

@@ -2,7 +2,7 @@
 
 All notable changes to the ADO Boards extension (formerly Azure DevOps Boards) will be documented in this file.
 
-## [0.3.0] - Unreleased
+## [0.3.0] - 2026-11-13
 
 First release of **ADO Boards**, the community-maintained fork of Azure DevOps Boards by Damilola Onadeinde. It is based on upstream v0.2.8 (commit `9a08de9`). Entries for 0.2.8 and earlier below are the original author's releases.
 
