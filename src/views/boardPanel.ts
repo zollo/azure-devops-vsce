@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { jsArg, safeCssColor, serializeForScript, webviewCsp } from '../utils/webviewSecurity';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItemEventManager } from '../events/workItemEventManager';
 import { OrganizationManager } from '../authentication/organizationManager';
@@ -2274,6 +2275,7 @@ export class BoardPanel {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview)}">
     <title>Loading Board...</title>
     <style>
         body {
@@ -2321,6 +2323,7 @@ export class BoardPanel {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview)}">
     <title>Board Error</title>
     <style>
         body {
@@ -2405,7 +2408,7 @@ export class BoardPanel {
 
         const columns = this.currentBoard.columns;
         const workItems = this.currentBoard.workItems;
-        const boardsJson = JSON.stringify(this.availableBoards);
+        const boardsJson = serializeForScript(this.availableBoards);
 
         // Extract unique types from work items on the board
         const uniqueTypes = new Set<string>();
@@ -2497,6 +2500,7 @@ export class BoardPanel {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview)}">
     <title>Board: ${this._escapeHtml(this.boardName)}</title>
     <style>
         @font-face {
@@ -4084,7 +4088,7 @@ export class BoardPanel {
                 <div class="board-dropdown" id="boardDropdown">
                     ${this.availableBoards.map(board => `
                         <div class="board-dropdown-item ${board.id === this.boardId ? 'active' : ''}"
-                             onclick="switchBoard('${board.id}', '${this._escapeHtml(board.name)}')">
+                             onclick="switchBoard(${jsArg(board.id)}, ${jsArg(board.name)})">
                             <span class="board-icon">${this._getBoardIcon(board.name)}</span>
                             <span class="board-name">${this._escapeHtml(board.name)}</span>
                         </div>
@@ -4256,7 +4260,7 @@ export class BoardPanel {
                     </div>
                     <div class="column-header-right">
                         ${colIndex === 0 ? `
-                        <button class="add-item-header-btn" onclick="event.stopPropagation(); showAddForm('${this._escapeHtml(column.name)}')" title="New item">
+                        <button class="add-item-header-btn" onclick="event.stopPropagation(); showAddForm(${jsArg(column.name)})" title="New item">
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/></svg>
                             New item
                         </button>
@@ -4276,7 +4280,7 @@ export class BoardPanel {
                             </button>
                             <div class="add-item-type-menu" id="add-item-type-menu">
                                 ${allWorkItemTypes.map(type => `
-                                    <div class="type-menu-item ${type === defaultWorkItemType ? 'selected' : ''}" data-type="${this._escapeHtml(type)}" onclick="selectWorkItemType('${this._escapeHtml(type)}')" title="${this._escapeHtml(type)}">
+                                    <div class="type-menu-item ${type === defaultWorkItemType ? 'selected' : ''}" data-type="${this._escapeHtml(type)}" onclick="selectWorkItemType(${jsArg(type)})" title="${this._escapeHtml(type)}">
                                         <span class="type-icon">${this._getTypeIcon(type)}</span>
                                     </div>
                                 `).join('')}
@@ -4284,8 +4288,8 @@ export class BoardPanel {
                         </div>
                         <input type="hidden" id="add-item-type-value" value="${this._escapeHtml(defaultWorkItemType)}" />
                         <input type="text" class="add-item-input" id="add-item-title-input" placeholder="Enter title..."
-                               onkeydown="handleAddKeydown(event, '${this._escapeHtml(column.name)}')" />
-                        <button class="btn btn-primary add-item-submit" onclick="createItem('${this._escapeHtml(column.name)}')">Add to top</button>
+                               onkeydown="handleAddKeydown(event, ${jsArg(column.name)})" />
+                        <button class="btn btn-primary add-item-submit" onclick="createItem(${jsArg(column.name)})">Add to top</button>
                     </div>
                 </div>
                 ` : ''}
@@ -4316,7 +4320,7 @@ export class BoardPanel {
             <div class="submenu" id="stateSubmenu">
                 ${columns.map(col => {
                     const state = Object.values(col.stateMappings || {})[0] || col.name;
-                    return `<div class="context-menu-item" onclick="contextMenuAction('changeState', '${this._escapeHtml(String(state))}')">${this._escapeHtml(String(state))}</div>`;
+                    return `<div class="context-menu-item" onclick="contextMenuAction('changeState', ${jsArg(String(state))})">${this._escapeHtml(String(state))}</div>`;
                 }).join('')}
             </div>
         </div>
@@ -5447,7 +5451,7 @@ export class BoardPanel {
         // ========== FILTER FUNCTIONALITY ==========
         let currentUserEmail = ''; // Will be set when user info is available
         let hideDoneActive = false; // Show all items by default
-        const currentIterationPath = ${JSON.stringify(this._currentIterationPath || '')};
+        const currentIterationPath = ${serializeForScript(this._currentIterationPath || '')};
 
         // Initialize filters on load
         document.addEventListener('DOMContentLoaded', () => {
@@ -5800,14 +5804,14 @@ export class BoardPanel {
         const tags = item.tags
             ? item.tags.split(';').map((tag) => {
                 const tagName = tag.trim();
-                const tagColor = this._getTagColor(tagName);
+                const tagColor = safeCssColor(this._getTagColor(tagName), '#8b8b8b');
                 const textColor = this._getContrastTextColor(tagColor);
                 return `<span class="tag" style="background-color: ${tagColor}; border-color: ${tagColor}; color: ${textColor};">${this._escapeHtml(tagName)}</span>`;
               }).join('')
             : '';
 
         // Check if any card styling rules apply to this work item
-        const cardBackgroundColor = this._getCardBackgroundColor(item);
+        const cardBackgroundColor = safeCssColor(this._getCardBackgroundColor(item));
         const cardStyle = cardBackgroundColor ? `style="background-color: ${cardBackgroundColor} !important;"` : '';
         const hasChildren = item.children && item.children.length > 0;
 
@@ -5847,7 +5851,7 @@ export class BoardPanel {
                 <span class="status-dot ${stateClass}"></span>
                 <span class="status-label">${this._escapeHtml(item.state)}</span>
             </div>
-            <div class="card-assignee" onclick="event.stopPropagation(); changeCardAssignee(${item.id}, '${this._escapeHtml(item.assignedTo?.displayName || '')}')">
+            <div class="card-assignee" onclick="event.stopPropagation(); changeCardAssignee(${item.id}, ${jsArg(item.assignedTo?.displayName || '')})">
                 <div class="card-avatar ${!item.assignedTo ? 'unassigned' : ''}">${initials}</div>
                 <span class="card-assignee-name ${!item.assignedTo ? 'unassigned-text' : ''}">${item.assignedTo ? this._escapeHtml(item.assignedTo.displayName) : ''}</span>
             </div>
@@ -5907,7 +5911,7 @@ export class BoardPanel {
             checklistContent.push(`
                 <div class="checklist-add-item">
                     <button class="checklist-add-button"
-                            onclick="event.stopPropagation(); addChildWorkItem(${item.id}, '${this._escapeHtml(type)}')"
+                            onclick="event.stopPropagation(); addChildWorkItem(${item.id}, ${jsArg(type)})"
                             title="Add new ${this._escapeHtml(type)}">
                         <span class="add-icon">+</span> Add ${this._escapeHtml(type)}
                     </button>

@@ -158,7 +158,7 @@ Access these commands from the Command Palette (`Cmd+Shift+P` or `Ctrl+Shift+P`)
 
 ## Requirements
 
-- Visual Studio Code 1.85.0 or higher
+- Visual Studio Code 1.95.0 or higher
 - Azure DevOps account with appropriate permissions
 - Microsoft account for authentication
 
