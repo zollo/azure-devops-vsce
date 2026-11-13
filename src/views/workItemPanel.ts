@@ -2926,7 +2926,7 @@ export class WorkItemPanel {
 
         // Tag Management
         const existingTags = ${serializeForScript(this._existingTags)};
-        let currentTags = ${tags ? JSON.stringify(tags.split(';').map((t: string) => t.trim()).filter((t: string) => t)) : '[]'};
+        let currentTags = ${serializeForScript(tags ? tags.split(';').map((t: string) => t.trim()).filter((t: string) => t) : [])};
         let selectedSuggestionIndex = -1;
 
         function getCurrentTagsString() {
@@ -2959,7 +2959,7 @@ export class WorkItemPanel {
             const currentValue = input.value;
 
             display.innerHTML = currentTags.map(tag =>
-                \`<span class="tag-chip-editable">\${escapeHtml(tag)}<button class="tag-remove" onclick="removeTag('\${escapeHtml(tag)}')">×</button></span>\`
+                \`<span class="tag-chip-editable">\${escapeHtml(tag)}<button class="tag-remove" onclick="removeTag(\${jsArg(tag)})">×</button></span>\`
             ).join('') + \`<input type="text" class="tag-input" id="tagInput" placeholder="Add tag..." oninput="handleTagInput()" onkeydown="handleTagKeydown(event)" onfocus="showTagSuggestions()" onblur="hideTagSuggestions()">\`;
 
             const newInput = document.getElementById('tagInput');
@@ -2974,7 +2974,7 @@ export class WorkItemPanel {
 
             if (!query) {
                 suggestions.innerHTML = existingTags.slice(0, 10).map(tag =>
-                    \`<div class="tag-suggestion-item" onmousedown="selectTag('\${escapeHtml(tag)}')">\${escapeHtml(tag)}</div>\`
+                    \`<div class="tag-suggestion-item" onmousedown="selectTag(\${jsArg(tag)})">\${escapeHtml(tag)}</div>\`
                 ).join('');
             } else {
                 const filtered = existingTags.filter(tag =>
@@ -2983,10 +2983,10 @@ export class WorkItemPanel {
 
                 if (filtered.length > 0) {
                     suggestions.innerHTML = filtered.slice(0, 10).map(tag =>
-                        \`<div class="tag-suggestion-item" onmousedown="selectTag('\${escapeHtml(tag)}')">\${escapeHtml(tag)}</div>\`
+                        \`<div class="tag-suggestion-item" onmousedown="selectTag(\${jsArg(tag)})">\${escapeHtml(tag)}</div>\`
                     ).join('');
                 } else if (query.length > 0) {
-                    suggestions.innerHTML = \`<div class="tag-suggestion-item" onmousedown="selectTag('\${escapeHtml(query)}')">Create: \${escapeHtml(query)}</div>\`;
+                    suggestions.innerHTML = \`<div class="tag-suggestion-item" onmousedown="selectTag(\${jsArg(query)})">Create: \${escapeHtml(query)}</div>\`;
                 } else {
                     suggestions.innerHTML = '';
                 }
@@ -3065,9 +3065,14 @@ export class WorkItemPanel {
         }
 
         function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+            return String(text ?? '')
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
+
+        // Encode a value as a JS string literal for an inline handler attribute, e.g. onclick="f(\${jsArg(x)})".
+        function jsArg(text) {
+            return escapeHtml(JSON.stringify(String(text ?? '')));
         }
     </script>
 </body>
