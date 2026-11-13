@@ -40,6 +40,9 @@ CI runs the same checks on every pull request.
 3. Merge to `main`, then push a tag `vX.Y.Z`. The Release workflow builds the VSIX, creates the
    GitHub Release and publishes to the Marketplace (see `.github/workflows/release.yml` for setup).
    If a publish step fails, re-run the workflow: it reuses the existing GitHub Release and its VSIX.
+   To make a GitHub Release without publishing to the Marketplace, run the Release workflow from
+   the Actions tab on `main` with the tag name and "marketplace" unticked; run it again with it
+   ticked to publish that same VSIX later.
 
 ## License
 
