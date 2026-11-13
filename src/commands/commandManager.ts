@@ -16,7 +16,6 @@ import { OrganizationManager } from '../authentication/organizationManager';
 import { ConnectionStatusProvider } from '../authentication/connectionStatusProvider';
 
 import { WorkItemLinksManager } from '../utils/workItemLinksManager';
-import { SettingsUIProvider } from '../ai/settings-ui';
 import { WorkItemEventManager } from '../events/workItemEventManager';
 import { SearchService } from '../services/searchService';
 import { WorkItemQuickPick } from '../views/workItemQuickPick';
@@ -2176,42 +2175,6 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
             } else {
                 vscode.window.showErrorMessage('Work item created but failed to link');
             }
-        })
-    );
-
-    // AI Settings command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('azureDevOps.openAISettings', async () => {
-            const outputChannel = vscode.window.createOutputChannel('Azure DevOps AI');
-            SettingsUIProvider.createSettingsPanel(context, outputChannel);
-        })
-    );
-
-    // Configure MCP Permissions command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('azureDevOps.configureMCPPermissions', async () => {
-            vscode.commands.executeCommand('azureDevOps.openAISettings');
-        })
-    );
-
-    // Update Config command (for AI providers)
-    context.subscriptions.push(
-        vscode.commands.registerCommand('azureDevOps.updateConfig', async (serverName?: string, enabled?: boolean) => {
-            // Show specific message if server name is provided
-            if (serverName !== undefined && enabled !== undefined) {
-                if (enabled) {
-                    vscode.window.showInformationMessage(`MCP server "${serverName}" enabled`);
-                } else {
-                    vscode.window.showInformationMessage(`MCP server "${serverName}" disabled`);
-                }
-            }
-        })
-    );
-
-    // Reload MCP Servers command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('azureDevOps.reloadMCPServers', async (serverName?: string, enabled?: boolean) => {
-            await vscode.commands.executeCommand('azureDevOps.updateConfig', serverName, enabled);
         })
     );
 }

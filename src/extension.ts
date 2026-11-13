@@ -13,10 +13,7 @@ import { WorkItemLinksManager } from './utils/workItemLinksManager';
 import { WhatsNewPanel } from './views/whatsNewPanel';
 import { SearchService } from './services/searchService';
 import { ActiveWorkItemService } from './services/activeWorkItemService';
-// DISABLED: AI Chat features - uncomment to re-enable in future
-// import { AIChatProvider } from './ai/chat-provider';
-// import { ChatEditorProvider, openChatEditor } from './ai/chat-editor';
-// import { AzureDevOpsChatParticipant } from './ai/chat-participant';
+import { detectOriginalExtensionConflict } from './utils/conflictDetection';
 
 export let authenticationManager: AuthenticationManager;
 export let workItemProvider: WorkItemProvider;
@@ -31,10 +28,13 @@ export let connectionStatusProvider: ConnectionStatusProvider;
 export let outputChannel: vscode.OutputChannel;
 export let searchService: SearchService;
 export let activeWorkItemService: ActiveWorkItemService;
-// DISABLED: AI Chat features - uncomment to re-enable in future
-// export let aiChatProvider: AIChatProvider;
 
 export async function activate(context: vscode.ExtensionContext) {
+    // The original extension registers the same command IDs; running both breaks activation.
+    if (detectOriginalExtensionConflict(context)) {
+        return;
+    }
+
     console.log('Azure DevOps Boards extension is now active!');
 
     // Initialize output channel
@@ -56,40 +56,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Connect status bar to active work item service
     statusBarManager.setActiveWorkItemService(activeWorkItemService);
-
-    // DISABLED: AI Chat features - uncomment to re-enable in future
-    // // Initialize AI output channel
-    // const aiOutputChannel = vscode.window.createOutputChannel('Azure DevOps AI');
-    // context.subscriptions.push(aiOutputChannel);
-
-    // // Initialize AI chat provider
-    // aiChatProvider = new AIChatProvider(context.extensionUri, aiOutputChannel, context);
-    // context.subscriptions.push(
-    //     vscode.window.registerWebviewViewProvider('azureDevOpsAIChat', aiChatProvider)
-    // );
-
-    // // Register chat editor provider
-    // context.subscriptions.push(
-    //     ChatEditorProvider.register(context, aiOutputChannel)
-    // );
-
-    // // Register command to open chat in editor
-    // context.subscriptions.push(
-    //     vscode.commands.registerCommand('azureDevOps.openAIChatEditor', () => openChatEditor(context))
-    // );
-
-    // // Alias command for backwards compatibility: openAIChat -> openAIChatEditor
-    // context.subscriptions.push(
-    //     vscode.commands.registerCommand('azureDevOps.openAIChat', () => vscode.commands.executeCommand('azureDevOps.openAIChatEditor'))
-    // );
-
-    // // Register chat participant for VSCode's built-in chat
-    // const chatParticipant = new AzureDevOpsChatParticipant(aiOutputChannel, context);
-    // const participant = vscode.chat.createChatParticipant('azure-devops.chat', async (request, chatContext, stream, token) => {
-    //     await chatParticipant.handleChatRequest(request, chatContext, stream, token);
-    // });
-    // participant.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.png');
-    // context.subscriptions.push(participant);
 
     // Initialize providers
     workItemProvider = new WorkItemProvider(context, authenticationManager);

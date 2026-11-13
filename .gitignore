@@ -83,3 +83,7 @@ coverage/
 *.tsbuildinfo
 # Claude Code configuration
 .claude/
+
+# OS and editor/agent tool files
+.DS_Store
+.roo/
