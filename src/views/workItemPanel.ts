@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { jsArg, sanitizeRichText, serializeForScript, webviewCsp } from '../utils/webviewSecurity';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem } from '../models/workItem';
 import { WorkItemEventManager } from '../events/workItemEventManager';
@@ -1051,12 +1052,15 @@ export class WorkItemPanel {
     }
 
     private _getHtmlForWebview(comments: any[] = [], linkedItems: any[] = [], attachments: any[] = [], currentUser: any = null): string {
+        const quillDist = vscode.Uri.joinPath(this._extensionUri, 'node_modules', 'quill', 'dist');
+        const quillCssUri = this._panel.webview.asWebviewUri(vscode.Uri.joinPath(quillDist, 'quill.snow.css'));
+        const quillJsUri = this._panel.webview.asWebviewUri(vscode.Uri.joinPath(quillDist, 'quill.min.js'));
         if (!this._workItem) return '<html><body><p>No work item loaded</p></body></html>';
 
         const fields = this._workItem.fields;
         const title = this.escapeHtml(fields['System.Title'] || '');
-        const description = fields['System.Description'] || '';
-        const acceptanceCriteria = (fields as any)['Microsoft.VSTS.Common.AcceptanceCriteria'] || '';
+        const description = sanitizeRichText(fields['System.Description'] || '');
+        const acceptanceCriteria = sanitizeRichText((fields as any)['Microsoft.VSTS.Common.AcceptanceCriteria'] || '');
         const state = fields['System.State'] || '';
         const type = fields['System.WorkItemType'] || '';
         const assignedTo = fields['System.AssignedTo']?.displayName || 'Unassigned';
@@ -1101,9 +1105,9 @@ export class WorkItemPanel {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data: vscode-resource:; script-src 'unsafe-inline' 'unsafe-eval' https://cdn.quilljs.com; style-src 'unsafe-inline' https://cdn.quilljs.com; font-src https://cdn.quilljs.com; connect-src https://cdn.quilljs.com;">
+    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview)}">
     <title>#${this._workItem.id}</title>
-    <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+    <link href="${quillCssUri}" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -2003,7 +2007,7 @@ export class WorkItemPanel {
             font-size: 13px;
         }
     </style>
-    <script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
+    <script src="${quillJsUri}"></script>
 </head>
 <body>
     <div class="container">
@@ -2091,7 +2095,7 @@ export class WorkItemPanel {
                             </div>
                             ${this._teamMembers.map(m => {
                                 const isSelected = m.uniqueName === assignedToUniqueName;
-                                return `<div class="assignee-dropdown-item ${isSelected ? 'selected' : ''}" onclick="selectAssignee('${this.escapeHtml(m.uniqueName)}', '${this.escapeHtml(m.displayName)}')">
+                                return `<div class="assignee-dropdown-item ${isSelected ? 'selected' : ''}" onclick="selectAssignee(${jsArg(m.uniqueName)}, ${jsArg(m.displayName)})">
                                     ${this.escapeHtml(m.displayName)}
                                 </div>`;
                             }).join('')}
@@ -2106,7 +2110,7 @@ export class WorkItemPanel {
                 </div>
                 <div class="meta-item">
                     <span class="meta-label">Effort / Story Points</span>
-                    <input type="number" class="meta-input effort-input" id="effortInput" value="${effort}" placeholder="0" onchange="updateEffort()">
+                    <input type="number" class="meta-input effort-input" id="effortInput" value="${this.escapeHtml(String(effort))}" placeholder="0" onchange="updateEffort()">
                 </div>
                 <div class="meta-item" style="z-index: 10;">
                     <span class="meta-label">Iteration</span>
@@ -2138,7 +2142,7 @@ export class WorkItemPanel {
                     <span class="meta-label">Tags</span>
                     <div class="tags-editor-container">
                         <div class="tags-display" id="tagsDisplay">
-                            ${tags ? tags.split(';').map(t => `<span class="tag-chip-editable">${this.escapeHtml(t.trim())}<button class="tag-remove" onclick="removeTag('${this.escapeHtml(t.trim())}')">×</button></span>`).join('') : ''}
+                            ${tags ? tags.split(';').map(t => `<span class="tag-chip-editable">${this.escapeHtml(t.trim())}<button class="tag-remove" onclick="removeTag(${jsArg(t.trim())})">×</button></span>`).join('') : ''}
                             <input type="text" class="tag-input" id="tagInput" placeholder="Add tag..." oninput="handleTagInput()" onkeydown="handleTagKeydown(event)" onfocus="showTagSuggestions()" onblur="hideTagSuggestions()">
                         </div>
                         <div class="tag-suggestions" id="tagSuggestions"></div>
@@ -2184,7 +2188,7 @@ export class WorkItemPanel {
                     return groups;
                 }, {})).map(([linkType, items]: [string, any]) => `
                     <div class="link-group">
-                        <div class="link-group-title">${linkType} (${items.length})</div>
+                        <div class="link-group-title">${this.escapeHtml(linkType)} (${items.length})</div>
                         ${items.map((item: any) => `
                             <div class="linked-item" onclick="openLinkedItem(${item.id})">
                                 <span class="linked-item-id">#${item.id}</span>
@@ -2209,12 +2213,12 @@ export class WorkItemPanel {
                     <div class="attachment-item">
                         <span class="attachment-icon">${this.getFileIcon(att.name)}</span>
                         <div class="attachment-info">
-                            <div class="attachment-name" onclick="downloadAttachment('${this.escapeHtml(att.url)}', '${this.escapeHtml(att.name)}')">${this.escapeHtml(att.name)}</div>
+                            <div class="attachment-name" onclick="downloadAttachment(${jsArg(att.url)}, ${jsArg(att.name)})">${this.escapeHtml(att.name)}</div>
                             <div class="attachment-meta">${att.resourceSize ? this.formatFileSize(att.resourceSize) : ''}${att.comment ? ' • ' + this.escapeHtml(att.comment) : ''}</div>
                         </div>
                         <div class="attachment-actions">
-                            <button class="attachment-btn" onclick="downloadAttachment('${this.escapeHtml(att.url)}', '${this.escapeHtml(att.name)}')" title="Download">↓</button>
-                            <button class="attachment-btn delete" onclick="deleteAttachment('${this.escapeHtml(att.url)}')" title="Remove">×</button>
+                            <button class="attachment-btn" onclick="downloadAttachment(${jsArg(att.url)}, ${jsArg(att.name)})" title="Download">↓</button>
+                            <button class="attachment-btn delete" onclick="deleteAttachment(${jsArg(att.url)})" title="Remove">×</button>
                         </div>
                     </div>
                 `).join('')}
@@ -2227,13 +2231,13 @@ export class WorkItemPanel {
         <div class="card" id="stateSection">
             <div class="card-title">Change State</div>
             <div class="state-pills">
-                ${stateOptions.map(s => `<button class="state-option ${s === state ? 'active' : ''}" onclick="changeState('${s}')">${s}</button>`).join('')}
+                ${stateOptions.map(s => `<button class="state-option ${s === state ? 'active' : ''}" onclick="changeState(${jsArg(s)})">${this.escapeHtml(s)}</button>`).join('')}
             </div>
         </div>
 
         <div class="card">
             <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                <div style="width: 32px; height: 32px; border-radius: 50%; background: ${currentUserColor}; color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px;">${currentUserInitials}</div>
+                <div style="width: 32px; height: 32px; border-radius: 50%; background: ${currentUserColor}; color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px;">${this.escapeHtml(currentUserInitials)}</div>
                 <div class="card-title" style="margin-bottom: 0;">Add a comment</div>
             </div>
             <div class="comment-input-area">
@@ -2248,7 +2252,7 @@ export class WorkItemPanel {
             <div class="timeline">
                 ${comments.map(c => `
                     <div class="timeline-item">
-                        <div class="timeline-icon" style="background: ${this.getAvatarColor(c.createdBy?.displayName || 'Unknown')}; color: white; font-weight: 600; font-size: 12px;">${this.getInitials(c.createdBy?.displayName || 'Unknown')}</div>
+                        <div class="timeline-icon" style="background: ${this.getAvatarColor(c.createdBy?.displayName || 'Unknown')}; color: white; font-weight: 600; font-size: 12px;">${this.escapeHtml(this.getInitials(c.createdBy?.displayName || 'Unknown'))}</div>
                         <div class="timeline-content">
                             <div class="timeline-header">
                                 <span class="timeline-author">${this.escapeHtml(c.createdBy?.displayName || 'Unknown')} <span style="text-decoration: underline; font-weight: normal;">commented ${this.formatRelativeTime(c.createdDate)}</span></span>
@@ -2257,7 +2261,7 @@ export class WorkItemPanel {
                                     <button class="comment-action-btn" onclick="deleteComment(${c.id})" title="Delete">🗑️</button>
                                 </div>
                             </div>
-                            <div class="timeline-text" id="comment-${c.id}" style="word-wrap: break-word;">${this.sanitizeHtml(c.text || '')}</div>
+                            <div class="timeline-text" id="comment-${c.id}" style="word-wrap: break-word;">${sanitizeRichText(c.text || '')}</div>
                             <div id="edit-${c.id}" style="display: none;">
                                 <div id="editor-${c.id}" style="background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 6px; margin-top: 8px;"></div>
                                 <div style="margin-top: 8px; display: flex; gap: 8px;">
@@ -2447,7 +2451,7 @@ export class WorkItemPanel {
             console.log('Description editor created');
 
             // Set initial content using Quill's API to avoid Delta model crash
-            const descriptionContent = ${JSON.stringify(description || '')};
+            const descriptionContent = ${serializeForScript(description || '')};
             if (descriptionContent) {
                 descriptionQuill.clipboard.dangerouslyPasteHTML(0, descriptionContent);
             }
@@ -2500,7 +2504,7 @@ export class WorkItemPanel {
             console.log('Acceptance criteria editor created');
 
             // Set initial acceptance criteria content using Quill's API
-            const acceptanceCriteriaContent = ${JSON.stringify(acceptanceCriteria || '')};
+            const acceptanceCriteriaContent = ${serializeForScript(acceptanceCriteria || '')};
             if (acceptanceCriteriaContent) {
                 acceptanceCriteriaQuill.clipboard.dangerouslyPasteHTML(0, acceptanceCriteriaContent);
             }
@@ -2921,8 +2925,8 @@ export class WorkItemPanel {
         }
 
         // Tag Management
-        const existingTags = ${JSON.stringify(this._existingTags)};
-        let currentTags = ${tags ? JSON.stringify(tags.split(';').map((t: string) => t.trim()).filter((t: string) => t)) : '[]'};
+        const existingTags = ${serializeForScript(this._existingTags)};
+        let currentTags = ${serializeForScript(tags ? tags.split(';').map((t: string) => t.trim()).filter((t: string) => t) : [])};
         let selectedSuggestionIndex = -1;
 
         function getCurrentTagsString() {
@@ -2955,7 +2959,7 @@ export class WorkItemPanel {
             const currentValue = input.value;
 
             display.innerHTML = currentTags.map(tag =>
-                \`<span class="tag-chip-editable">\${escapeHtml(tag)}<button class="tag-remove" onclick="removeTag('\${escapeHtml(tag)}')">×</button></span>\`
+                \`<span class="tag-chip-editable">\${escapeHtml(tag)}<button class="tag-remove" onclick="removeTag(\${jsArg(tag)})">×</button></span>\`
             ).join('') + \`<input type="text" class="tag-input" id="tagInput" placeholder="Add tag..." oninput="handleTagInput()" onkeydown="handleTagKeydown(event)" onfocus="showTagSuggestions()" onblur="hideTagSuggestions()">\`;
 
             const newInput = document.getElementById('tagInput');
@@ -2970,7 +2974,7 @@ export class WorkItemPanel {
 
             if (!query) {
                 suggestions.innerHTML = existingTags.slice(0, 10).map(tag =>
-                    \`<div class="tag-suggestion-item" onmousedown="selectTag('\${escapeHtml(tag)}')">\${escapeHtml(tag)}</div>\`
+                    \`<div class="tag-suggestion-item" onmousedown="selectTag(\${jsArg(tag)})">\${escapeHtml(tag)}</div>\`
                 ).join('');
             } else {
                 const filtered = existingTags.filter(tag =>
@@ -2979,10 +2983,10 @@ export class WorkItemPanel {
 
                 if (filtered.length > 0) {
                     suggestions.innerHTML = filtered.slice(0, 10).map(tag =>
-                        \`<div class="tag-suggestion-item" onmousedown="selectTag('\${escapeHtml(tag)}')">\${escapeHtml(tag)}</div>\`
+                        \`<div class="tag-suggestion-item" onmousedown="selectTag(\${jsArg(tag)})">\${escapeHtml(tag)}</div>\`
                     ).join('');
                 } else if (query.length > 0) {
-                    suggestions.innerHTML = \`<div class="tag-suggestion-item" onmousedown="selectTag('\${escapeHtml(query)}')">Create: \${escapeHtml(query)}</div>\`;
+                    suggestions.innerHTML = \`<div class="tag-suggestion-item" onmousedown="selectTag(\${jsArg(query)})">Create: \${escapeHtml(query)}</div>\`;
                 } else {
                     suggestions.innerHTML = '';
                 }
@@ -3061,9 +3065,14 @@ export class WorkItemPanel {
         }
 
         function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+            return String(text ?? '')
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
+
+        // Encode a value as a JS string literal for an inline handler attribute, e.g. onclick="f(\${jsArg(x)})".
+        function jsArg(text) {
+            return escapeHtml(JSON.stringify(String(text ?? '')));
         }
     </script>
 </body>
@@ -3118,27 +3127,6 @@ export class WorkItemPanel {
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
         };
         return text.replace(/[&<>"']/g, m => map[m]);
-    }
-
-    private sanitizeHtml(html: string): string {
-        // Allow safe HTML tags for rich text display
-        const allowedTags = ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'ul', 'ol', 'li', 'a', 'code', 'pre', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'div', 'img'];
-        const allowedAttributes: Record<string, string[]> = {
-            'a': ['href', 'title', 'data-vss-mention'],
-            'span': ['style', 'class'],
-            'div': ['style', 'class'],
-            'p': ['class'],
-            'img': ['src', 'alt', 'width', 'height'],
-            'li': ['class']
-        };
-
-        // Basic sanitization - remove script tags and dangerous attributes
-        let sanitized = html
-            .replace(/<script[^>]*>.*?<\/script>/gi, '')
-            .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
-            .replace(/javascript:/gi, '');
-
-        return sanitized;
     }
 
     private stripHtml(html: string): string {

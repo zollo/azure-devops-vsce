@@ -631,7 +631,7 @@ export class WorkItemsListPanel {
             const iconUri = this._panel.webview.asWebviewUri(
                 vscode.Uri.joinPath(this._extensionUri, 'media', iconFile)
             );
-            return `<img src="${iconUri}" width="20" height="20" alt="${type}" title="${type}" style="vertical-align: middle;">`;
+            return `<img src="${iconUri}" width="20" height="20" alt="${this.escapeHtml(type)}" title="${this.escapeHtml(type)}" style="vertical-align: middle;">`;
         }
 
         return `<span style="font-size: 16px;">📄</span>`;
@@ -661,7 +661,7 @@ export class WorkItemsListPanel {
             );
             return `<img src="${profileIconUri}" alt="Unassigned" class="unassigned-avatar">`;
         }
-        return initials.toUpperCase();
+        return this.escapeHtml(initials.toUpperCase());
     }
 
     private _getHtmlForWebview(): string {
@@ -1314,7 +1314,7 @@ export class WorkItemsListPanel {
                                     <strong>${this.escapeHtml(title)}</strong>
                                 </td>
                                 <td class="clickable-cell">
-                                    <span class="state-pill state-${stateClass}">${this.escapeHtml(state)}</span>
+                                    <span class="state-pill state-${this.escapeHtml(stateClass)}">${this.escapeHtml(state)}</span>
                                     <button class="action-btn cell-actions change-state-btn" data-id="${id}">⋯</button>
                                 </td>
                                 <td class="clickable-cell">

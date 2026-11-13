@@ -17,10 +17,18 @@ First release of **ADO Boards**, the community-maintained fork of Azure DevOps B
 
 ### Removed
 - The disabled AI chat assistant, including its `azureDevOps.ai.*` settings, the Open AI Assistant / Open AI Chat in Editor / Configure MCP Servers commands, and its React webview and dependencies
-- Unused dependencies (`@azure/msal-node`, `vscode-uri`, `@vscode/codicons`) and leftover backup source files
+- Unused dependencies (`@azure/msal-node`, `vscode-uri`) and leftover backup and unused source files
 
 ### Fixed
 - Auth headers are refreshed when the access token changes
+
+### Security
+- Upgraded axios to 1.21 (fixes SSRF, prototype pollution, header-leak and CRLF advisories in axios, follow-redirects and form-data)
+- Added a Content-Security-Policy to the board webviews and tightened the work item webview policy (no remote scripts, no `unsafe-eval`)
+- The Quill editor (1.3.7) is now shipped with the extension instead of loaded from a CDN
+- Work item descriptions, acceptance criteria and comments are sanitized with `sanitize-html` before rendering
+- Fixed escaping of board, column, state, assignee and attachment names inside click handlers, and of data embedded in webview scripts
+- Minimum VS Code version raised to 1.95
 
 ## [0.2.8] - 2026-02-25
 
