@@ -1777,7 +1777,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                 .replace(/^-|-$/g, '')
                 .substring(0, 40);
 
-            let defaultBranchName = branchFormat
+            const defaultBranchName = branchFormat
                 .replace('{id}', workItemId.toString())
                 .replace('{title}', sanitizedTitle);
 
@@ -1938,7 +1938,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                 // For Azure DevOps repos, create PR via API
                 if (repoUrl && repoUrl.includes('dev.azure.com')) {
                     // Extract repo name from URL
-                    const repoMatch = repoUrl.match(/\/([^\/]+?)(?:\.git)?$/);
+                    const repoMatch = repoUrl.match(/\/([^/]+?)(?:\.git)?$/);
                     const repoName = repoMatch ? repoMatch[1].replace('.git', '') : '';
 
                     if (repoName) {

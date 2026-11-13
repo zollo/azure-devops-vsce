@@ -158,7 +158,7 @@ Access these commands from the Command Palette (`Cmd+Shift+P` or `Ctrl+Shift+P`)
 
 ## Requirements
 
-- Visual Studio Code 1.95.0 or higher
+- Visual Studio Code 1.101.0 or higher
 - Azure DevOps account with appropriate permissions
 - Microsoft account for authentication
 
@@ -184,6 +184,21 @@ Access these commands from the Command Palette (`Cmd+Shift+P` or `Ctrl+Shift+P`)
 - **Taskboard**: Interactive taskboard for daily standups
 - **Capacity Planning**: Track team capacity and allocation
 - **Burndown**: Monitor sprint progress (planned)
+
+## Development
+
+Requires Node.js 22.
+
+```bash
+npm ci
+npm run build              # bundle to dist/ (esbuild); `npm run watch` to rebuild on change
+npm run lint               # ESLint 9 + typescript-eslint
+npm test                   # unit tests (node:test), no VS Code needed
+npm run test:integration   # smoke tests inside VS Code 1.101 (downloads VS Code; needs a display or xvfb on Linux)
+npx @vscode/vsce package   # build a .vsix
+```
+
+Press F5 in VS Code to launch an Extension Development Host after `npm run build`.
 
 ## Support
 

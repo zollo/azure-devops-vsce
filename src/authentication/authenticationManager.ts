@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import axios, { AxiosInstance } from 'axios';
+import { getOrMigratePat } from './patStorage';
 
 export interface AzureDevOpsConfig {
     organizationUrl: string;
@@ -80,20 +81,12 @@ export class AuthenticationManager {
     }
 
     private async getOrMigratePat(): Promise<string> {
-        const storedPat = (await this.context.secrets.get(AuthenticationManager.PAT_SECRET_KEY))?.trim() || '';
-        if (storedPat) {
-            return storedPat;
-        }
-
-        const workspaceConfig = vscode.workspace.getConfiguration('azureDevOps');
-        const legacyPat = workspaceConfig.get<string>('personalAccessToken', '').trim();
-        if (!legacyPat) {
-            return '';
-        }
-
-        await this.context.secrets.store(AuthenticationManager.PAT_SECRET_KEY, legacyPat);
-        await this.clearLegacyPatSetting();
-        return legacyPat;
+        return getOrMigratePat(
+            this.context.secrets,
+            AuthenticationManager.PAT_SECRET_KEY,
+            () => vscode.workspace.getConfiguration('azureDevOps').get<string>('personalAccessToken', ''),
+            () => this.clearLegacyPatSetting()
+        );
     }
 
     private async loadConfiguration(): Promise<void> {

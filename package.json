@@ -16,7 +16,7 @@
   ],
   "license": "MIT",
   "engines": {
-    "vscode": "^1.95.0"
+    "vscode": "^1.101.0"
   },
   "categories": [
     "Other",
@@ -25,7 +25,7 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
@@ -637,28 +637,37 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run package",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
-    "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js",
-    "build": "npm run compile"
+    "check-types": "tsc -p ./ --noEmit",
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "npm run check-types && node esbuild.js --production",
+    "lint": "eslint .",
+    "test": "npm run test:unit",
+    "test:unit": "npm run compile && node --test out/test/unit/*.test.js",
+    "test:integration": "npm run compile && npm run build && vscode-test"
   },
   "devDependencies": {
-    "@types/node": "^20.19.43",
+    "@eslint/js": "^9.39.5",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.20.5",
     "@types/sanitize-html": "^2.16.2",
-    "@types/vscode": "1.95.0",
-    "@typescript-eslint/eslint-plugin": "^6.13.1",
-    "@typescript-eslint/parser": "^6.13.1",
-    "eslint": "^8.54.0",
-    "typescript": "^5.3.2"
+    "@types/vscode": "1.101.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.5",
+    "globals": "^17.14.0",
+    "mocha": "^12.0.3",
+    "typescript": "^5.3.2",
+    "typescript-eslint": "^8.72.2"
   },
   "dependencies": {
     "@vscode/codicons": "^0.0.44",
     "axios": "^1.21.1",
     "quill": "^1.3.7",
-    "sanitize-html": "2.17.5"
+    "sanitize-html": "^2.18.2"
   },
   "repository": {
     "type": "git",

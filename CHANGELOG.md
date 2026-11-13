@@ -14,12 +14,14 @@ First release of **ADO Boards**, the community-maintained fork of Azure DevOps B
 - Renamed to **ADO Boards** and moved to a new Marketplace publisher and the [zollo/azure-devops-vsce](https://github.com/zollo/azure-devops-vsce) repository
 - Personal Access Tokens are now stored in VS Code SecretStorage and migrated out of settings automatically
 - README, LICENSE and package metadata now credit the original author
+- The extension is now bundled with esbuild into a single file; the package no longer ships `node_modules` (about 495 KB, down from 8.8 MB in 0.2.8)
 
 ### Removed
 - The disabled AI chat assistant, including its `azureDevOps.ai.*` settings, the Open AI Assistant / Open AI Chat in Editor / Configure MCP Servers commands, and its React webview and dependencies
 - Unused dependencies (`@azure/msal-node`, `vscode-uri`) and leftover backup and unused source files
 
 ### Fixed
+- The "unassigned" avatar image in the Work Items list was missing from the package
 - Auth headers are refreshed when the access token changes
 
 ### Security
@@ -28,7 +30,7 @@ First release of **ADO Boards**, the community-maintained fork of Azure DevOps B
 - The Quill editor (1.3.7) is now shipped with the extension instead of loaded from a CDN
 - Work item descriptions, acceptance criteria and comments are sanitized with `sanitize-html` before rendering
 - Fixed escaping of board, column, state, assignee and attachment names inside click handlers, and of data embedded in webview scripts
-- Minimum VS Code version raised to 1.95
+- Minimum VS Code version raised to 1.101 (May 2025), the first release whose extension host runs Node 22, which the HTML sanitizer requires
 
 ## [0.2.8] - 2026-02-25
 
