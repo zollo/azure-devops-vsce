@@ -1,9 +1,20 @@
 {
   "name": "azure-devops-boards",
-  "displayName": "Azure DevOps Boards",
-  "description": "Azure DevOps Boards integration for Visual Studio Code - Manage work items, boards, sprints, and more without leaving your editor",
-  "version": "0.2.8",
-  "publisher": "Damilola",
+  "displayName": "ADO Boards",
+  "description": "Unofficial, community-maintained Azure DevOps Boards integration for VS Code. Manage work items, boards, sprints and backlogs without leaving your editor.",
+  "version": "0.3.0",
+  "publisher": "publisher-tbd",
+  "author": {
+    "name": "Joe Zollo",
+    "url": "https://github.com/zollo"
+  },
+  "contributors": [
+    {
+      "name": "Damilola Onadeinde",
+      "url": "https://github.com/dammyboss"
+    }
+  ],
+  "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -16,32 +27,6 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "_DISABLED_chatParticipants": [
-      {
-        "id": "azure-devops.chat",
-        "name": "azure-devops",
-        "description": "AI assistant for Azure DevOps - manage work items, boards, and more",
-        "isSticky": true,
-        "commands": [
-          {
-            "name": "help",
-            "description": "Get help with Azure DevOps commands"
-          }
-        ]
-      }
-    ],
-    "_DISABLED_customEditors": [
-      {
-        "viewType": "azureDevOps.chatEditor",
-        "displayName": "Azure DevOps AI Chat",
-        "selector": [
-          {
-            "filenamePattern": "*.aichat"
-          }
-        ],
-        "priority": "default"
-      }
-    ],
     "commands": [
       {
         "command": "azureDevOps.connect",
@@ -282,24 +267,6 @@
         "title": "Setup Connection Wizard",
         "category": "Azure DevOps",
         "icon": "$(settings-gear)"
-      },
-      {
-        "command": "azureDevOps.openAIChat",
-        "title": "Open AI Assistant",
-        "category": "Azure DevOps",
-        "icon": "$(comment-discussion)"
-      },
-      {
-        "command": "azureDevOps.openAIChatEditor",
-        "title": "Open AI Chat in Editor",
-        "category": "Azure DevOps",
-        "icon": "$(comment-discussion)"
-      },
-      {
-        "command": "azureDevOps.configureMCP",
-        "title": "Configure MCP Servers",
-        "category": "Azure DevOps",
-        "icon": "$(server)"
       },
       {
         "command": "azureDevOps.showWhatsNew",
@@ -665,270 +632,38 @@
           "minimum": 10,
           "maximum": 1000,
           "description": "Maximum number of work items to load in the tree view"
-        },
-        "azureDevOps.ai.provider": {
-          "type": "string",
-          "enum": [
-            "anthropic",
-            "azure",
-            "deepseek",
-            "grok",
-            "openai"
-          ],
-          "default": "anthropic",
-          "description": "AI provider to use for chat assistant"
-        },
-        "azureDevOps.ai.anthropic.apiKey": {
-          "type": "string",
-          "default": "",
-          "description": "Anthropic API key for Claude models"
-        },
-        "azureDevOps.ai.anthropic.model": {
-          "type": "string",
-          "enum": [
-            "claude-sonnet-4-20250514",
-            "claude-opus-4-20250514",
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-haiku-20241022"
-          ],
-          "default": "claude-sonnet-4-20250514",
-          "description": "Claude model to use"
-        },
-        "azureDevOps.ai.azure.endpoint": {
-          "type": "string",
-          "default": "",
-          "description": "Azure OpenAI endpoint URL"
-        },
-        "azureDevOps.ai.azure.apiKey": {
-          "type": "string",
-          "default": "",
-          "description": "Azure OpenAI API key"
-        },
-        "azureDevOps.ai.azure.deployment": {
-          "type": "string",
-          "default": "",
-          "description": "Azure OpenAI deployment name"
-        },
-        "azureDevOps.ai.azure.apiVersion": {
-          "type": "string",
-          "default": "2024-02-15-preview",
-          "description": "Azure OpenAI API version"
-        },
-        "azureDevOps.ai.azure.model": {
-          "type": "string",
-          "enum": [
-            "gpt-4o",
-            "gpt-4o-mini",
-            "gpt-4-turbo",
-            "gpt-4",
-            "gpt-35-turbo"
-          ],
-          "default": "gpt-4o",
-          "description": "Azure OpenAI model"
-        },
-        "azureDevOps.ai.deepseek.apiKey": {
-          "type": "string",
-          "default": "",
-          "description": "DeepSeek API key"
-        },
-        "azureDevOps.ai.deepseek.model": {
-          "type": "string",
-          "enum": [
-            "deepseek-chat",
-            "deepseek-coder",
-            "deepseek-reasoner"
-          ],
-          "default": "deepseek-chat",
-          "description": "DeepSeek model"
-        },
-        "azureDevOps.ai.grok.apiKey": {
-          "type": "string",
-          "default": "",
-          "description": "Grok API key"
-        },
-        "azureDevOps.ai.grok.model": {
-          "type": "string",
-          "enum": [
-            "grok-beta",
-            "grok-2"
-          ],
-          "default": "grok-beta",
-          "description": "Grok model"
-        },
-        "azureDevOps.ai.openai.apiKey": {
-          "type": "string",
-          "default": "",
-          "description": "OpenAI API key"
-        },
-        "azureDevOps.ai.openai.model": {
-          "type": "string",
-          "enum": [
-            "gpt-4o",
-            "gpt-4o-mini",
-            "gpt-4-turbo",
-            "gpt-4",
-            "gpt-3.5-turbo"
-          ],
-          "default": "gpt-4o",
-          "description": "OpenAI model"
-        },
-        "azureDevOps.ai.mcp.servers": {
-          "type": "array",
-          "default": [],
-          "description": "MCP (Model Context Protocol) servers configuration",
-          "items": {
-            "type": "object",
-            "properties": {
-              "name": {
-                "type": "string",
-                "description": "Unique name for this MCP server"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "local",
-                  "remote"
-                ],
-                "description": "Type: 'local' for stdio-based, 'remote' for HTTP-based"
-              },
-              "url": {
-                "type": "string",
-                "description": "URL for remote MCP servers"
-              },
-              "command": {
-                "type": "string",
-                "description": "Command for local MCP servers (e.g., 'node', 'python')"
-              },
-              "args": {
-                "type": "array",
-                "description": "Arguments for the command (local only)",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "env": {
-                "type": "object",
-                "description": "Environment variables (local only)",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              "headers": {
-                "type": "object",
-                "description": "HTTP headers (remote only)",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              }
-            },
-            "required": [
-              "name",
-              "type"
-            ]
-          }
-        },
-        "azureDevOps.ai.permissions.autoApproveEnabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "Enable auto-approval for AI actions"
-        },
-        "azureDevOps.ai.permissions.alwaysAllowReadOnly": {
-          "type": "boolean",
-          "default": false,
-          "description": "Auto-approve read-only operations (file reading, searching)"
-        },
-        "azureDevOps.ai.permissions.alwaysAllowWrite": {
-          "type": "boolean",
-          "default": false,
-          "description": "Auto-approve write operations (file creation, editing)"
-        },
-        "azureDevOps.ai.permissions.alwaysAllowBrowser": {
-          "type": "boolean",
-          "default": false,
-          "description": "Auto-approve browser-related actions"
-        },
-        "azureDevOps.ai.permissions.alwaysAllowMcp": {
-          "type": "boolean",
-          "default": false,
-          "description": "Auto-approve MCP tool execution"
-        },
-        "azureDevOps.ai.permissions.alwaysAllowExecute": {
-          "type": "boolean",
-          "default": false,
-          "description": "Auto-approve command execution"
-        },
-        "azureDevOps.ai.permissions.alwaysAllowTodoList": {
-          "type": "boolean",
-          "default": false,
-          "description": "Allow AI to use todo lists for task tracking"
-        },
-        "azureDevOps.ai.permissions.allowedCommands": {
-          "type": "array",
-          "default": [],
-          "description": "List of commands allowed to execute automatically (empty means all)",
-          "items": {
-            "type": "string"
-          }
-        },
-        "azureDevOps.ai.permissions.allowedMaxRequests": {
-          "type": "number",
-          "default": null,
-          "description": "Maximum number of API requests per session (null means unlimited)"
-        },
-        "azureDevOps.ai.permissions.allowedMaxCost": {
-          "type": "number",
-          "default": null,
-          "description": "Maximum cost in dollars per session (null means unlimited)"
         }
       }
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile && npm run webpack",
+    "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "webpack": "webpack --mode production",
-    "webpack:dev": "webpack --mode development --watch",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js",
-    "build": "npm run compile && npm run webpack"
+    "build": "npm run compile"
   },
   "devDependencies": {
-    "@types/markdown-it": "^14.1.2",
     "@types/node": "18.x",
-    "@types/react": "^19.2.9",
-    "@types/react-dom": "^19.2.3",
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.13.1",
     "@typescript-eslint/parser": "^6.13.1",
-    "css-loader": "^7.1.2",
     "eslint": "^8.54.0",
-    "style-loader": "^4.0.0",
-    "ts-loader": "^9.5.4",
-    "typescript": "^5.3.2",
-    "webpack": "^5.104.1",
-    "webpack-cli": "^6.0.1"
+    "typescript": "^5.3.2"
   },
   "dependencies": {
-    "@azure/msal-node": "^3.8.5",
-    "@radix-ui/react-popover": "^1.1.15",
-    "@vscode/codicons": "^0.0.44",
-    "axios": "^1.6.2",
-    "lucide-react": "^0.562.0",
-    "markdown-it": "^14.1.0",
-    "react": "^19.2.3",
-    "react-dom": "^19.2.3",
-    "react-markdown": "^10.1.0",
-    "react-textarea-autosize": "^8.5.9",
-    "rehype-highlight": "^7.0.2",
-    "remark-gfm": "^4.0.1",
-    "vscode-uri": "^3.0.7"
+    "axios": "^1.6.2"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/dammyboss/azure-devops-vsce"
+    "url": "https://github.com/zollo/azure-devops-vsce"
   },
+  "bugs": {
+    "url": "https://github.com/zollo/azure-devops-vsce/issues"
+  },
+  "homepage": "https://github.com/zollo/azure-devops-vsce#readme",
   "icon": "media/icon.png",
   "keywords": [
     "azure",

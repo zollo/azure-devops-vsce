@@ -1,6 +1,26 @@
 # Changelog
 
-All notable changes to the Azure DevOps Boards extension will be documented in this file.
+All notable changes to the ADO Boards extension (formerly Azure DevOps Boards) will be documented in this file.
+
+## [0.3.0] - Unreleased
+
+First release of **ADO Boards**, the community-maintained fork of Azure DevOps Boards by Damilola Onadeinde. It is based on upstream v0.2.8 (commit `9a08de9`). Entries for 0.2.8 and earlier below are the original author's releases.
+
+### Added
+- Choice of authentication method: Microsoft account (OAuth) or Personal Access Token
+- Error with options to show or uninstall the original `Damilola.azure-devops-boards` extension when both are enabled, since they share command and setting IDs
+
+### Changed
+- Renamed to **ADO Boards** and moved to a new Marketplace publisher and the [zollo/azure-devops-vsce](https://github.com/zollo/azure-devops-vsce) repository
+- Personal Access Tokens are now stored in VS Code SecretStorage and migrated out of settings automatically
+- README, LICENSE and package metadata now credit the original author
+
+### Removed
+- The disabled AI chat assistant, including its `azureDevOps.ai.*` settings, the Open AI Assistant / Open AI Chat in Editor / Configure MCP Servers commands, and its React webview and dependencies
+- Unused dependencies (`@azure/msal-node`, `vscode-uri`, `@vscode/codicons`) and leftover backup source files
+
+### Fixed
+- Auth headers are refreshed when the access token changes
 
 ## [0.2.8] - 2026-02-25
 
@@ -203,4 +223,4 @@ All notable changes to the Azure DevOps Boards extension will be documented in t
 
 **Note:** This extension is actively maintained and regularly updated with new features and improvements.
 
-For detailed feature information, visit the [GitHub repository](https://github.com/dammyboss/azure-devops-vsce).
+For detailed feature information, visit the [GitHub repository](https://github.com/zollo/azure-devops-vsce).

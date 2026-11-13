@@ -17,7 +17,6 @@ node_modules/**/docs
 .github/**
 .roo/**
 .claude/**
-webpack.config.js
 tsconfig.json
 package-lock.json
 *.vsix
@@ -26,3 +25,5 @@ media/demo.mov
 media/*.mov
 media/*.mp4
 media/*.gif
+scripts/**
+**/.DS_Store

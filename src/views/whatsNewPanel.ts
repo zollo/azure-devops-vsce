@@ -783,10 +783,10 @@ export class WhatsNewPanel {
                             </div>
                             <div class="header-text">
                                 <h1>
-                                    Azure DevOps Boards
-                                    <span class="version-badge">v0.2.8</span>
+                                    ADO Boards
+                                    <span class="version-badge">v0.3.0</span>
                                 </h1>
-                                <p>What's new in this release</p>
+                                <p>What's new in this release &middot; Originally created by Damilola Onadeinde</p>
                             </div>
                         </div>
                     </div>
@@ -912,17 +912,17 @@ export class WhatsNewPanel {
                     <!-- Footer -->
                     <div class="modal-footer">
                         <div class="footer-links">
-                            <button class="footer-link" onclick="openUrl('https://github.com/dammyboss/azure-devops-vsce')">
+                            <button class="footer-link" onclick="openUrl('https://github.com/zollo/azure-devops-vsce')">
                                 <img src="https://img.icons8.com/fluency-systems-regular/48/github.png" alt="GitHub" class="footer-link-img">
                                 GitHub
                             </button>
                             <span class="footer-divider">&bull;</span>
-                            <button class="footer-link" onclick="openUrl('https://github.com/dammyboss/azure-devops-vsce/issues')">
+                            <button class="footer-link" onclick="openUrl('https://github.com/zollo/azure-devops-vsce/issues')">
                                 <img src="https://img.icons8.com/fluency-systems-regular/48/topic.png" alt="Report Issues" class="footer-link-img">
                                 Report Issues
                             </button>
                             <span class="footer-divider">&bull;</span>
-                            <button class="footer-link" onclick="openUrl('https://github.com/dammyboss/azure-devops-vsce/blob/main/CHANGELOG.md')">
+                            <button class="footer-link" onclick="openUrl('https://github.com/zollo/azure-devops-vsce/blob/main/CHANGELOG.md')">
                                 <img src="https://img.icons8.com/ios/50/document--v1.png" alt="Full Changelog" class="footer-link-img">
                                 Full Changelog
                             </button>

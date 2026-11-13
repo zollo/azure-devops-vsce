@@ -1,21 +1,20 @@
-# Azure DevOps Boards for VS Code
+# ADO Boards for VS Code
 
 [![VS Code Extension](https://img.shields.io/badge/VS%20Code-Extension-007ACC?style=flat&logo=visual-studio-code)](https://marketplace.visualstudio.com/)
 [![TypeScript](https://img.shields.io/badge/Built%20with-TypeScript-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org/)
-[![GitHub](https://img.shields.io/badge/GitHub-dammyboss-181717?style=flat&logo=github)](https://github.com/dammyboss)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-Damilola_Onadeinde-0077B5?style=flat&logo=linkedin)](https://linkedin.com/in/damilola-onadeinde)
-[![YouTube](https://img.shields.io/badge/YouTube-DevOps_with_Dami-FF0000?style=flat&logo=youtube)](https://youtube.com/@devopswithdami)
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support%20My%20Work-orange?style=flat&logo=buymeacoffee)](https://buymeacoffee.com/devopswithdami)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
 
 Manage your Azure DevOps Boards, work items, sprints, and backlogs directly from Visual Studio Code. Plan, track, and collaborate on your projects without leaving your editor.
 
+> **Community fork.** ADO Boards is a community-maintained continuation of [Azure DevOps Boards](https://github.com/dammyboss/azure-devops-vsce) by [Damilola Onadeinde](https://github.com/dammyboss), originally published as `Damilola.azure-devops-boards`. It is based on upstream v0.2.8 and is distributed under the same MIT license. See [Credits](#credits).
+>
+> This is an unofficial extension and is not affiliated with or endorsed by Microsoft.
+
+> **Switching from the original extension?** Uninstall or disable `Damilola.azure-devops-boards` first. Both extensions use the same commands and settings, so they cannot run at the same time, but your existing settings carry over.
+
 ## Demo
 
-https://github.com/user-attachments/assets/demo.mov
-
-<video src="./media/demo.mov" controls width="100%">
-  Your browser does not support the video tag.
-</video>
+![ADO Boards demo](media/demo.gif)
 
 ## Features
 
@@ -79,7 +78,7 @@ https://github.com/user-attachments/assets/demo.mov
 
 ### Authentication
 
-1. Open the Azure DevOps Boards view from the Activity Bar
+1. Open the Azure DevOps view from the Activity Bar
 2. Click "Sign In" in the Connection section
 3. Authenticate with your Microsoft account in the browser
 4. Return to VS Code - you're now connected!
@@ -188,7 +187,7 @@ Access these commands from the Command Palette (`Cmd+Shift+P` or `Ctrl+Shift+P`)
 
 ## Support
 
-For issues, feature requests, or contributions, please visit the [GitHub repository](https://github.com/dammyboss/azure-devops-vsce).
+For issues, feature requests, or contributions, please visit the [GitHub repository](https://github.com/zollo/azure-devops-vsce) or [open an issue](https://github.com/zollo/azure-devops-vsce/issues).
 
 ## Contributing
 
@@ -200,29 +199,22 @@ Contributions are welcome! Please feel free to submit a Pull Request. For major 
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## About the Developer
+## Credits
 
-**Damilola Onadeinde**  
-*DevOps/AI Engineer | Cloud Infrastructure Specialist | Open Source Contributor*
+ADO Boards was originally created by **Damilola Onadeinde** as [Azure DevOps Boards](https://github.com/dammyboss/azure-devops-vsce). The board, work item, sprint, backlog and authentication foundations, and the release history up to v0.2.8 in the [changelog](CHANGELOG.md), are their work. This fork is maintained by [Joe Zollo](https://github.com/zollo).
 
-Connect with me:
+If you'd like to thank the original author:
 
 <a href="https://github.com/dammyboss"><img src="https://img.icons8.com/fluent/48/000000/github.png" alt="GitHub" width="40"/></a>
 <a href="https://linkedin.com/in/damilola-onadeinde"><img src="https://img.icons8.com/fluent/48/000000/linkedin.png" alt="LinkedIn" width="40"/></a>
 <a href="https://devopswithdami.com"><img src="https://img.icons8.com/fluent/48/000000/domain.png" alt="Portfolio" width="40"/></a>
 <a href="https://youtube.com/@devopswithdami"><img src="https://img.icons8.com/fluent/48/000000/youtube-play.png" alt="YouTube" width="40"/></a>
 
-## Support the Developer
-
-If you find this project helpful and would like to support my work, consider buying me a coffee!
-
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support%20My%20Work-orange?style=for-the-badge&logo=buymeacoffee)](https://buymeacoffee.com/devopswithdami)
-
-Your support helps me continue creating open-source tools and improving this project!
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support%20Damilola-orange?style=for-the-badge&logo=buymeacoffee)](https://buymeacoffee.com/devopswithdami)
 
 ## License
 
-MIT License
+[MIT](LICENSE). Copyright (c) 2026 Damilola Onadeinde and Copyright (c) 2026 Joe Zollo.
 
 ---
 
