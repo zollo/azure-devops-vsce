@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { AuthenticationManager } from './authenticationManager';
+import { organizationLabel } from '../onboarding/discovery';
+import { ConnectionHealth } from './connectionMonitor';
 
 class ConnectionStatusItem extends vscode.TreeItem {
     constructor(
@@ -25,6 +27,16 @@ export class ConnectionStatusProvider implements vscode.TreeDataProvider<Connect
         });
     }
 
+    private health: ConnectionHealth = 'unknown';
+
+    /** Called by the connection monitor so the view warns about outages and expired sign-ins. */
+    setHealth(health: ConnectionHealth): void {
+        if (health !== this.health) {
+            this.health = health;
+            this.refresh();
+        }
+    }
+
     refresh(): void {
         this._onDidChangeTreeData.fire();
     }
@@ -48,91 +60,60 @@ export class ConnectionStatusProvider implements vscode.TreeDataProvider<Connect
 
         const userInfo = await this.authManager.getUserInfo();
         const config = this.authManager.getConfig();
-        const status = this.authManager.getConnectionStatus();
+        const settings = vscode.workspace.getConfiguration('azureDevOps');
+        const change: vscode.Command = { command: 'azureDevOps.getStarted', title: 'Change Connection Settings' };
 
-        items.push(
-            new ConnectionStatusItem(
-                userInfo?.name || 'Signed in',
-                userInfo?.email || '',
-                undefined,
-                new vscode.ThemeIcon('account', new vscode.ThemeColor('notificationsInfoIcon.foreground'))
-            )
+        // Account, then where you are connected. Changing settings and signing out live in the
+        // view's title bar, so the list stays short.
+        const isPat = this.authManager.getConfiguredAuthenticationMethod() === 'pat';
+        const account = new ConnectionStatusItem(
+            isPat ? 'Personal access token' : userInfo?.name || 'Signed in',
+            isPat ? '' : userInfo?.email || '',
+            undefined,
+            new vscode.ThemeIcon(isPat ? 'key' : 'account')
         );
+        items.push(account);
 
-        if (config?.organizationUrl) {
-            const orgName = config.organizationUrl.replace('https://dev.azure.com/', '').replace(/\/$/, '');
-            items.push(
-                new ConnectionStatusItem(
-                    orgName,
-                    'Organization',
-                    {
-                        command: 'azureDevOps.setupWizard',
-                        title: 'Change Organization'
-                    },
-                    new vscode.ThemeIcon('organization', new vscode.ThemeColor('charts.purple'))
-                )
-            );
-        } else {
-            items.push(
-                new ConnectionStatusItem(
-                    'No organization selected',
-                    'Click to select',
-                    {
-                        command: 'azureDevOps.setupWizard',
-                        title: 'Select Organization'
-                    },
-                    new vscode.ThemeIcon('warning', new vscode.ThemeColor('notificationsWarningIcon.foreground'))
-                )
-            );
+        if (!config?.organizationUrl) {
+            items.push(new ConnectionStatusItem('Choose an organization', '', change, new vscode.ThemeIcon('warning', new vscode.ThemeColor('notificationsWarningIcon.foreground'))));
+            return items;
         }
 
-        if (config?.defaultProject) {
-            items.push(
-                new ConnectionStatusItem(
-                    config.defaultProject,
-                    'Project',
-                    {
-                        command: 'azureDevOps.setupWizard',
-                        title: 'Change Project'
-                    },
-                    new vscode.ThemeIcon('project', new vscode.ThemeColor('charts.green'))
-                )
-            );
+        const organization = new ConnectionStatusItem(organizationLabel(config.organizationUrl), '', change, new vscode.ThemeIcon('organization'));
+        organization.tooltip = config.organizationUrl;
+        items.push(organization);
+
+        if (config.defaultProject) {
+            items.push(new ConnectionStatusItem(config.defaultProject, '', change, new vscode.ThemeIcon('project')));
         }
 
-        items.push(
-            new ConnectionStatusItem(
-                '───────────────',
-                '',
-                undefined,
-                undefined
-            )
-        );
+        let teams = settings.get<string[]>('teams', []).filter(t => typeof t === 'string' && t);
+        const primary = config.defaultTeam || teams[0];
+        if (primary && !teams.some(t => t.toLowerCase() === primary.toLowerCase())) {
+            // Select Team changed the team without updating the saved list, so the list is stale.
+            teams = [primary];
+        }
+        if (primary) {
+            const others = teams.filter(t => t.toLowerCase() !== primary.toLowerCase()).length;
+            const team = new ConnectionStatusItem(primary, others ? `+${others} more` : '', change, new vscode.ThemeIcon('people'));
+            team.tooltip = teams.length > 1 ? `Teams: ${teams.join(', ')} (primary: ${primary})` : `Team: ${primary}`;
+            items.push(team);
+        }
 
-        items.push(
-            new ConnectionStatusItem(
-                'Change Organization/Project',
-                '',
-                {
-                    command: 'azureDevOps.setupWizard',
-                    title: 'Change Organization/Project'
-                },
-                new vscode.ThemeIcon('gear', new vscode.ThemeColor('charts.blue'))
-            )
-        );
-
-        items.push(
-            new ConnectionStatusItem(
-                'Sign Out',
-                '',
-                {
-                    command: 'azureDevOps.disconnect',
-                    title: 'Sign Out'
-                },
-                new vscode.ThemeIcon('sign-out', new vscode.ThemeColor('charts.red'))
-            )
-        );
+        const problem = this.health === 'authExpired' ? 'Sign-in expired'
+            : this.health === 'offline' ? 'Cannot reach Azure DevOps'
+            : !this.authManager.isConnected() ? 'Not connected'
+            : undefined;
+        if (problem) {
+            items.push(new ConnectionStatusItem(
+                problem,
+                'Check connection',
+                { command: 'azureDevOps.checkConnection', title: 'Check Connection' },
+                new vscode.ThemeIcon('warning', new vscode.ThemeColor('notificationsWarningIcon.foreground'))
+            ));
+        }
 
         return items;
     }
 }
+

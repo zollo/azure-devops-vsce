@@ -10,6 +10,7 @@ import {
     normalizeOrganizationUrl,
     normalizeTenantInput,
     organizationKey,
+    organizationLabel,
     organizationNameFromUrl,
     parseAzureReposRemote,
     parseOrganizations,
@@ -267,4 +268,11 @@ test('treats both Azure DevOps Services URL forms as the same organization', () 
     const projects = [{ id: 'a', name: 'App' }, { id: 'b', name: 'Billing', lastUpdateTime: '2026-06-01T00:00:00Z' }];
     const remote = { organization: 'contoso', organizationUrl: 'https://dev.azure.com/contoso', project: 'App' };
     assert.deepEqual(suggestProject(projects, 'https://contoso.visualstudio.com', { remotes: [remote] }), { value: projects[0], reason: 'gitRemote' });
+});
+
+test('labels organizations by name', () => {
+    assert.equal(organizationLabel('https://dev.azure.com/contoso/'), 'contoso');
+    assert.equal(organizationLabel('https://Contoso.visualstudio.com'), 'Contoso');
+    assert.equal(organizationLabel('https://tfs.example.com/tfs/Coll'), 'tfs.example.com/tfs/Coll');
+    assert.equal(organizationLabel('https://dev.azure.com/%E0%A4%A'), '%E0%A4%A');
 });

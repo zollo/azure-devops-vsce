@@ -6,6 +6,7 @@ import axios from 'axios';
 import { ARM_SCOPE, AZURE_DEVOPS_SCOPE, Hints, HttpGet, parseAzureReposRemote, RemoteInfo, remoteUrlsFromGitConfig } from './discovery';
 import { MicrosoftSession, OnboardingController, OnboardingResult, WebviewMessage } from './onboardingController';
 import { vendorAssetUri } from '../utils/webviewAssets';
+import { decideStartupView, LAST_SHOWN_RELEASE_KEY, RELEASE_NOTES, releaseId, StartupView } from './releaseNotes';
 
 /** globalState key: the user chose "Skip setup", so don't open the wizard on startup again. */
 export const ONBOARDING_DISMISSED_KEY = 'azureDevOps.onboarding.dismissed';
@@ -15,8 +16,9 @@ const SESSION_SECRET_KEY = 'ado-session-id';
 const TENANT_SECRET_KEY = 'ado-tenant-id';
 
 /**
- * The "Get started" editor tab: welcome, feature overview, sign-in (Microsoft account or PAT)
- * and a review step with detected tenant, organization, project and teams.
+ * The "Get started" editor tab: welcome, feature overview and release highlights, sign-in
+ * (Microsoft account or PAT) and a review step with detected tenant, organization, project and
+ * teams. Opened with `whatsNew`, the same tab shows only the release highlights.
  */
 export class OnboardingPanel {
     private static current: OnboardingPanel | undefined;
@@ -24,13 +26,17 @@ export class OnboardingPanel {
     private readonly controller: OnboardingController;
     private readonly disposables: vscode.Disposable[] = [];
 
-    /** Opens the wizard, or focuses it if it is already open. */
-    public static show(context: vscode.ExtensionContext, onConfigured: () => Promise<void>): void {
+    /** Opens the wizard (or only What's new), or focuses the tab if it is already open. */
+    public static show(context: vscode.ExtensionContext, onConfigured: () => Promise<void>, mode: 'onboarding' | 'whatsNew' = 'onboarding'): void {
+        // Both views include the release highlights, so this release counts as shown.
+        void context.globalState.update(LAST_SHOWN_RELEASE_KEY, releaseId(RELEASE_NOTES));
         if (OnboardingPanel.current) {
+            OnboardingPanel.current.controller.showMode(mode);
             OnboardingPanel.current.panel.reveal(vscode.ViewColumn.One);
             return;
         }
-        const panel = vscode.window.createWebviewPanel('azureDevOpsOnboarding', 'Get Started with ADO Boards', vscode.ViewColumn.One, {
+        const title = mode === 'whatsNew' ? 'What\'s New in ADO Boards' : 'Get Started with ADO Boards';
+        const panel = vscode.window.createWebviewPanel('azureDevOpsOnboarding', title, vscode.ViewColumn.One, {
             enableScripts: true,
             retainContextWhenHidden: true,
             localResourceRoots: [
@@ -39,22 +45,24 @@ export class OnboardingPanel {
             ]
         });
         panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.png');
-        OnboardingPanel.current = new OnboardingPanel(panel, context, onConfigured);
+        OnboardingPanel.current = new OnboardingPanel(panel, context, onConfigured, mode);
     }
 
-    /** First run: open the wizard when nothing is configured and the user hasn't skipped it. */
-    public static shouldShowOnStartup(context: vscode.ExtensionContext): boolean {
-        if (context.globalState.get<boolean>(ONBOARDING_DISMISSED_KEY, false)) {
-            return false;
-        }
+    /** What to open on startup: the wizard for new or empty configurations, What's new once per release otherwise. */
+    public static startupView(context: vscode.ExtensionContext): StartupView {
         const organizationUrl = vscode.workspace.getConfiguration('azureDevOps').get<string>('organizationUrl', '');
-        return !organizationUrl.trim();
+        return decideStartupView({
+            configured: !!organizationUrl.trim(),
+            onboardingDismissed: context.globalState.get<boolean>(ONBOARDING_DISMISSED_KEY, false),
+            lastShownRelease: context.globalState.get<string>(LAST_SHOWN_RELEASE_KEY)
+        });
     }
 
     private constructor(
         private readonly panel: vscode.WebviewPanel,
         private readonly context: vscode.ExtensionContext,
-        private readonly onConfigured: () => Promise<void>
+        private readonly onConfigured: () => Promise<void>,
+        mode: 'onboarding' | 'whatsNew'
     ) {
         this.controller = new OnboardingController({
             signInMicrosoft: tenant => this.signInMicrosoft(tenant),
@@ -63,9 +71,12 @@ export class OnboardingPanel {
             getHints: () => collectHints(),
             save: result => this.save(result),
             dismiss: () => this.dismiss(),
-            post: state => { void this.panel.webview.postMessage({ type: 'state', state }); },
+            post: state => {
+                this.panel.title = state.step === 'whatsNew' ? 'What\'s New in ADO Boards' : 'Get Started with ADO Boards';
+                void this.panel.webview.postMessage({ type: 'state', state });
+            },
             log: message => console.log(`[Onboarding] ${message}`)
-        });
+        }, { release: RELEASE_NOTES, startWith: mode });
 
         panel.webview.html = this.getHtml(panel.webview);
         panel.webview.onDidReceiveMessage((message: WebviewMessage | { type: 'runCommand'; command?: string }) => {

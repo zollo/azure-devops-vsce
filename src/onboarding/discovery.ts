@@ -184,6 +184,21 @@ export function organizationNameFromUrl(url: string): string {
     return segments[segments.length - 1] || url;
 }
 
+/** "contoso" for https://dev.azure.com/contoso or https://contoso.visualstudio.com; the URL otherwise. */
+export function organizationLabel(url: string): string {
+    const trimmed = url.trim().replace(/\/+$/, '');
+    const modern = /^https:\/\/dev\.azure\.com\/([^/]+)$/i.exec(trimmed);
+    if (modern) {
+        try {
+            return decodeURIComponent(modern[1]);
+        } catch {
+            return modern[1];
+        }
+    }
+    const legacy = /^https:\/\/([^./]+)\.visualstudio\.com$/i.exec(trimmed);
+    return legacy ? legacy[1] : trimmed.replace(/^https?:\/\//i, '');
+}
+
 /** Parses `GET app.vssps.visualstudio.com/_apis/accounts?memberId=…`, sorted by name. */
 export function parseOrganizations(accountsResponse: any): Organization[] {
     const values: any[] = Array.isArray(accountsResponse?.value) ? accountsResponse.value : [];

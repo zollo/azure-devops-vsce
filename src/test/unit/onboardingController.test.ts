@@ -336,3 +336,47 @@ test('directory discovery uses the wizard\'s account and never interrupts anothe
     assert.equal(accounts.length, 1, 'no lookup while teams are loading');
     assert.equal(h.state().loading, 'teams');
 });
+
+test('What\'s new mode starts on the release highlights and can switch to setup', async () => {
+    const release = { version: '9.9.9', highlights: [{ kind: 'new' as const, icon: 'rocket', title: 'T', text: 'x' }] };
+    const deps: OnboardingDeps = {
+        signInMicrosoft: async () => undefined,
+        getArmToken: async () => undefined,
+        createHttp: () => async () => ({ data: {} }),
+        getHints: async () => ({ remotes: [] }),
+        save: async () => {},
+        dismiss: () => {},
+        post: () => {},
+        log: () => {}
+    };
+    const controller = new OnboardingController(deps, { release, startWith: 'whatsNew' });
+    assert.equal(controller.getState().step, 'whatsNew');
+    assert.equal(controller.getState().release.version, '9.9.9');
+    await controller.handle({ type: 'startOnboarding' });
+    assert.equal(controller.getState().step, 'welcome');
+    assert.equal(controller.getState().release.version, '9.9.9', 'release highlights stay on the welcome step');
+});
+
+test('an open tab switches to the requested view without losing setup progress', async () => {
+    const deps: OnboardingDeps = {
+        signInMicrosoft: async () => undefined,
+        getArmToken: async () => undefined,
+        createHttp: () => async () => ({ data: {} }),
+        getHints: async () => ({ remotes: [] }),
+        save: async () => {},
+        dismiss: () => {},
+        post: () => {},
+        log: () => {}
+    };
+    const controller = new OnboardingController(deps, { startWith: 'whatsNew' });
+    controller.showMode('onboarding');
+    assert.equal(controller.getState().step, 'welcome', 'Get Started leaves What\'s new');
+    controller.showMode('whatsNew');
+    assert.equal(controller.getState().step, 'whatsNew', 'What\'s new replaces the untouched welcome step');
+
+    (controller as any).state = { ...controller.getState(), step: 'review' };
+    controller.showMode('whatsNew');
+    assert.equal(controller.getState().step, 'review', 'setup in progress is kept');
+    controller.showMode('onboarding');
+    assert.equal(controller.getState().step, 'review');
+});

@@ -72,8 +72,10 @@ Releases are automated with [release-please](https://github.com/googleapis/relea
    bumps `package.json` and adds the merged commits to `CHANGELOG.md`. Edit the CHANGELOG on
    that branch if you want to reword entries; release-please keeps your edits only until the
    next push to `main`, so make final edits just before merging.
-2. Before merging it, update the What's New panel (`src/views/whatsNewPanel.ts`) and its
-   `LATEST_ANNOUNCEMENT_ID` in a normal pull request if the release deserves an announcement.
+2. Before merging it, update `RELEASE_NOTES` in `src/onboarding/releaseNotes.ts` (version and a
+   few highlights) in a normal pull request if the release deserves an announcement. A new
+   version shows What's New once to everyone with a configuration; new users see the highlights
+   in Get Started.
 3. Merge the release pull request. That tags `vX.Y.Z`, creates the GitHub Release with the
    changelog notes, and starts the Release workflow, which builds and tests the VSIX and
    attaches it. The Marketplace is skipped unless the repository variable
@@ -86,7 +88,7 @@ To force a specific version, add a commit with a `Release-As: X.Y.Z` footer.
 
 1. Update `version` in `package.json` and `.release-please-manifest.json`, and add a CHANGELOG
    entry dated today, as `## [X.Y.Z] - YYYY-MM-DD` (the Release workflow checks for this).
-2. Update the What's New panel (`src/views/whatsNewPanel.ts`) and its `LATEST_ANNOUNCEMENT_ID`.
+2. Update `RELEASE_NOTES` in `src/onboarding/releaseNotes.ts` (What's New).
 3. Merge to `main`, then push a tag `vX.Y.Z`. The Release workflow builds the VSIX, creates the
    GitHub Release and publishes to the Marketplace (see `.github/workflows/release.yml` for setup).
    If a publish step fails, re-run the workflow: it reuses the existing GitHub Release and its VSIX.

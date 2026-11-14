@@ -134,6 +134,50 @@
                 h('p', { className: 'subtitle' }, subtitle)));
     }
 
+    const KIND_TITLES = [['new', 'New'], ['improved', 'Improved'], ['fixed', 'Fixed']];
+    const REPO = 'https://github.com/zollo/azure-devops-vsce';
+
+    function highlight(/** @type {any} */ item, compact = false) {
+        return h('div', { className: compact ? 'highlight compact' : 'feature highlight' },
+            icon(String(item.icon || 'sparkle').replace(/[^a-z0-9-]/g, '')),
+            h('div', {}, h('h3', {}, item.title), h('p', {}, item.text)));
+    }
+
+    /** The release highlights as a compact list, for the welcome step. */
+    function renderWhatsNewSummary() {
+        const release = state.release;
+        if (!release || !release.highlights || !release.highlights.length) {
+            return null;
+        }
+        return h('section', { className: 'whats-new-summary', 'aria-label': 'What\u2019s new' },
+            h('h2', {}, icon('sparkle'), ` New in ${release.version}`),
+            h('div', { className: 'highlights' }, release.highlights.map((/** @type {any} */ item) => highlight(item, true))));
+    }
+
+    function renderWhatsNew() {
+        const release = state.release || { version: version, highlights: [] };
+        const run = (/** @type {string} */ command) => send({ type: 'runCommand', command });
+        return [
+            header('What\u2019s new in ADO Boards', `Version ${release.version}. Here\u2019s what changed since your last update.`),
+            KIND_TITLES.map(([kind, title]) => {
+                const items = release.highlights.filter((/** @type {any} */ item) => item.kind === kind);
+                return items.length
+                    ? h('section', { className: 'whats-new-group', 'aria-label': title },
+                        h('h2', {}, title),
+                        h('div', { className: 'features' }, items.map((/** @type {any} */ item) => highlight(item))))
+                    : null;
+            }),
+            h('div', { className: 'actions' },
+                button('Got it', () => run('close'), { iconName: 'check', id: 'whats-new-close' }),
+                linkButton('Change connection settings', () => send({ type: 'startOnboarding' }), 'whats-new-setup')),
+            h('footer', { className: 'footer' },
+                h('a', { href: `${REPO}/releases/tag/v${release.version}` }, 'Release notes'),
+                h('a', { href: `${REPO}/issues` }, 'Report an issue'),
+                h('a', { href: REPO }, 'GitHub'),
+                version ? h('span', { className: 'muted version' }, `v${version}`) : null)
+        ];
+    }
+
     function renderWelcome() {
         return [
             header('Welcome to ADO Boards', 'The extension is installed. Connect it to Azure DevOps to bring your work items, boards and sprints into VS Code.'),
@@ -154,6 +198,7 @@
                         h('span', { className: 'choice-text' },
                             h('span', { className: 'choice-title' }, 'Personal access token'),
                             h('span', { className: 'choice-desc' }, 'Paste a token you created in Azure DevOps. Use this for Azure DevOps Server, or if your organization blocks sign-in from VS Code.'))))),
+            renderWhatsNewSummary(),
             h('footer', { className: 'footer' },
                 linkButton('Skip setup', () => send({ type: 'dismiss' }), 'skip'),
                 h('span', { className: 'muted' }, 'You can come back with “Azure DevOps: Get Started”.'),
@@ -387,7 +432,7 @@
             ? [active.selectionStart, active.selectionEnd] : undefined;
 
         const views = new Map([
-            ['welcome', renderWelcome], ['signingIn', renderSigningIn], ['pat', renderPat],
+            ['whatsNew', renderWhatsNew], ['welcome', renderWelcome], ['signingIn', renderSigningIn], ['pat', renderPat],
             ['review', renderReview], ['saving', renderSaving], ['done', renderDone]
         ]);
         const step = views.has(state.step) ? state.step : 'welcome';
