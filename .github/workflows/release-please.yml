@@ -50,14 +50,14 @@ jobs:
         if: steps.release.outputs.pr
         uses: actions/checkout@v5
         with:
-          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          ref: ${{ fromJSON(steps.release.outputs.pr || '{}').headBranchName }}
           path: release-pr
 
       - name: Convert to CRLF and push
         if: steps.release.outputs.pr
         working-directory: release-pr
         env:
-          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          BRANCH: ${{ fromJSON(steps.release.outputs.pr || '{}').headBranchName }}
         run: |
           for f in package.json package-lock.json CHANGELOG.md; do
             sed -i 's/\r*$/\r/' "$f"
@@ -70,12 +70,14 @@ jobs:
           git commit -am "chore: keep CRLF line endings"
           git push origin "HEAD:$BRANCH"
 
+      # Step env is evaluated even when the step's if: is false, so fromJSON gets a fallback
+      # for runs where release-please has no release PR (for example right after a release).
       # Run after the CRLF push so the checks are on the release PR's final head commit.
       - name: Run CI and the Conventional Commits check on the release PR
         if: steps.release.outputs.pr
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          BRANCH: ${{ fromJSON(steps.release.outputs.pr || '{}').headBranchName }}
         run: |
           gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
           gh workflow run commitlint.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
