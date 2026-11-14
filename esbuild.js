@@ -1,6 +1,12 @@
 // Bundles the extension into dist/extension.js and copies the files the webviews load at runtime.
 // Usage: node esbuild.js [--production] [--watch]
-const esbuild = require('esbuild');
+let esbuild;
+try {
+    esbuild = require('esbuild');
+} catch {
+    console.error('esbuild is not installed. Run `npm ci` in the repository folder first.');
+    process.exit(1);
+}
 const fs = require('fs');
 const path = require('path');
 
