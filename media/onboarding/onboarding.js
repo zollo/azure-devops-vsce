@@ -46,7 +46,8 @@
                 /** @type {any} */ (el).value = value;
             } else if (key === 'checked') {
                 /** @type {any} */ (el).checked = !!value;
-            } else {
+            } else if (!key.toLowerCase().startsWith('on')) {
+                // Never set event-handler attributes from strings.
                 el.setAttribute(key, value === true ? '' : String(value));
             }
         }
@@ -342,12 +343,13 @@
         const selection = active instanceof HTMLInputElement && active.type !== 'checkbox'
             ? [active.selectionStart, active.selectionEnd] : undefined;
 
-        const views = {
-            welcome: renderWelcome, signingIn: renderSigningIn, pat: renderPat,
-            review: renderReview, saving: renderSaving, done: renderDone
-        };
-        const view = /** @type {any} */ (views)[state.step] || renderWelcome;
-        app.replaceChildren(h('div', { className: `step step-${state.step}` }, view()));
+        const views = new Map([
+            ['welcome', renderWelcome], ['signingIn', renderSigningIn], ['pat', renderPat],
+            ['review', renderReview], ['saving', renderSaving], ['done', renderDone]
+        ]);
+        const step = views.has(state.step) ? state.step : 'welcome';
+        const view = views.get(step) || renderWelcome;
+        app.replaceChildren(h('div', { className: `step step-${step}` }, view()));
 
         kept.forEach((value, id) => {
             const el = /** @type {HTMLInputElement | null} */ (document.getElementById(id));
@@ -369,6 +371,10 @@
 
     let lastStep = '';
     window.addEventListener('message', event => {
+        // Only the extension (through the VS Code webview host, same origin) sends messages.
+        if (event.origin !== window.origin && !String(event.origin).startsWith('vscode-webview://')) {
+            return;
+        }
         const message = event.data;
         if (message && message.type === 'state') {
             state = message.state;

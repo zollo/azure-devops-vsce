@@ -176,7 +176,7 @@ export function normalizeOrganizationUrl(input: string): string | undefined {
 
 /** Organization name from a normalized organization URL. */
 export function organizationNameFromUrl(url: string): string {
-    const legacy = /^https:\/\/([^.]+)\.visualstudio\.com/i.exec(url);
+    const legacy = /^https:\/\/([^./]+)\.visualstudio\.com(?:\/|$)/i.exec(url);
     if (legacy) {
         return legacy[1];
     }
@@ -366,14 +366,14 @@ function decode(segment: string): string {
 export function parseAzureReposRemote(remote: string): RemoteInfo | undefined {
     const value = remote.trim();
 
-    const ssh = /^(?:ssh:\/\/)?[^@\s]+@(?:ssh\.dev\.azure\.com|vs-ssh\.visualstudio\.com)(?::22)?[:/]v3\/([^/]+)\/([^/]+)\/[^/]+$/i.exec(value);
+    const ssh = /^(?:ssh:\/\/)?[^@\s]+@(ssh\.dev\.azure\.com|vs-ssh\.visualstudio\.com)(?::22)?[:/]v3\/([^/]+)\/([^/]+)\/[^/]+$/i.exec(value);
     if (ssh) {
-        const organization = decode(ssh[1]);
-        const legacyHost = /vs-ssh\.visualstudio\.com/i.test(value);
+        const legacyHost = ssh[1].toLowerCase() === 'vs-ssh.visualstudio.com';
+        const organization = decode(ssh[2]);
         return {
             organization,
             organizationUrl: legacyHost ? `https://${organization.toLowerCase()}.visualstudio.com` : `https://dev.azure.com/${organization}`,
-            project: decode(ssh[2])
+            project: decode(ssh[3])
         };
     }
 

@@ -9,6 +9,7 @@ import {
     mergeTeams,
     normalizeOrganizationUrl,
     normalizeTenantInput,
+    organizationNameFromUrl,
     parseAzureReposRemote,
     parseOrganizations,
     parseTenants,
@@ -70,6 +71,13 @@ test('normalizes organization URLs', () => {
     assert.equal(normalizeOrganizationUrl('https://tfs.example.com/tfs/Collection/'), 'https://tfs.example.com/tfs/Collection');
     assert.equal(normalizeOrganizationUrl('https://dev.azure.com/'), undefined);
     assert.equal(normalizeOrganizationUrl(''), undefined);
+});
+
+test('names organizations only from their own host', () => {
+    assert.equal(organizationNameFromUrl('https://contoso.visualstudio.com'), 'contoso');
+    assert.equal(organizationNameFromUrl('https://dev.azure.com/contoso'), 'contoso');
+    assert.equal(organizationNameFromUrl('https://contoso.visualstudio.com.evil.example/x'), 'x');
+    assert.equal(parseAzureReposRemote('git@evil.example:v3/vs-ssh.visualstudio.com/p/r'), undefined);
 });
 
 test('parses organizations from the accounts API', () => {
