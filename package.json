@@ -41,6 +41,18 @@
         "icon": "$(debug-disconnect)"
       },
       {
+        "command": "azureDevOps.checkConnection",
+        "title": "Check Connection",
+        "category": "Azure DevOps",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "azureDevOps.reauthenticate",
+        "title": "Sign In Again",
+        "category": "Azure DevOps",
+        "icon": "$(key)"
+      },
+      {
         "command": "azureDevOps.createWorkItem",
         "title": "Create Work Item",
         "category": "Azure DevOps",
@@ -597,6 +609,12 @@
           "default": 300,
           "minimum": 0,
           "description": "Auto-refresh interval in seconds (0 to disable)"
+        },
+        "azureDevOps.connectionCheckInterval": {
+          "type": "number",
+          "default": 120,
+          "minimum": 0,
+          "description": "How often, in seconds, to check in the background that Azure DevOps is reachable and your sign-in is still valid (0 to disable). Checks pause while VS Code is not focused."
         },
         "azureDevOps.showNotifications": {
           "type": "boolean",

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import axios, { AxiosInstance } from 'axios';
 import { getOrMigratePat } from './patStorage';
+import { classifyProbeStatus, ProbeResult } from './connectionMonitor';
 
 export interface AzureDevOpsConfig {
     organizationUrl: string;
@@ -30,6 +31,10 @@ export class AuthenticationManager {
     private session: vscode.AuthenticationSession | undefined;
     private readonly onDidChangeSessionEmitter = new vscode.EventEmitter<vscode.AuthenticationSession | undefined>();
     public readonly onDidChangeSession = this.onDidChangeSessionEmitter.event;
+    private readonly onDidDetectAuthFailureEmitter = new vscode.EventEmitter<void>();
+    /** Fires when a request was rejected as unauthorized and a silent refresh did not fix it. */
+    public readonly onDidDetectAuthFailure = this.onDidDetectAuthFailureEmitter.event;
+    private refreshInFlight: Promise<boolean> | undefined;
 
     constructor(context: vscode.ExtensionContext) {
         this.context = context;
@@ -39,6 +44,14 @@ export class AuthenticationManager {
     public getConfiguredAuthenticationMethod(): 'oauth' | 'pat' {
         const config = vscode.workspace.getConfiguration('azureDevOps');
         return config.get<'oauth' | 'pat'>('authenticationMethod', 'oauth');
+    }
+
+    private async getMicrosoftScopes(): Promise<string[]> {
+        // Include tenant scope if user previously switched tenants
+        const storedTenantId = await this.context.secrets.get('ado-tenant-id');
+        return storedTenantId
+            ? [...AuthenticationManager.SCOPES, `VSCODE_TENANT:${storedTenantId}`]
+            : AuthenticationManager.SCOPES;
     }
 
     private createPatSession(personalAccessToken: string): vscode.AuthenticationSession {
@@ -124,11 +137,7 @@ export class AuthenticationManager {
 
             const storedSessionId = await this.context.secrets.get('ado-session-id');
             if (storedSessionId) {
-                // Include tenant scope if user previously switched tenants
-                const storedTenantId = await this.context.secrets.get('ado-tenant-id');
-                const scopes = storedTenantId
-                    ? [...AuthenticationManager.SCOPES, `VSCODE_TENANT:${storedTenantId}`]
-                    : AuthenticationManager.SCOPES;
+                const scopes = await this.getMicrosoftScopes();
 
                 const session = await vscode.authentication.getSession(
                     'microsoft',
@@ -197,23 +206,195 @@ export class AuthenticationManager {
         );
 
         // Add response interceptor for error handling
-        this.axiosInstance.interceptors.response.use(
+        const instance = this.axiosInstance;
+        instance.interceptors.response.use(
             response => response,
-            error => {
-                if (error.response?.status === 401) {
-                    const message = this.config?.authenticationMethod === 'pat'
-                        ? 'Azure DevOps authentication failed. Please check your Personal Access Token.'
-                        : 'Azure DevOps authentication failed. Please sign in again.';
-                    vscode.window.showErrorMessage(message);
+            async error => {
+                const status = error.response?.status;
+                const requestConfig = error.config;
+                if (status === 401) {
+                    // An expired OAuth token can usually be replaced silently; retry once with the new one.
+                    if (requestConfig && !requestConfig._adoAuthRetried) {
+                        requestConfig._adoAuthRetried = true;
+                        const refreshed = await this.refreshSessionSilently();
+                        if (refreshed) {
+                            if (requestConfig.headers && typeof requestConfig.headers.delete === 'function') {
+                                requestConfig.headers.delete('Authorization');
+                            } else if (requestConfig.headers) {
+                                delete requestConfig.headers.Authorization;
+                            }
+                            return instance.request(requestConfig);
+                        }
+                    }
+                    // Leave the prompt to the connection monitor, so a burst of failing
+                    // requests produces one notification instead of one per request.
                     this.connectionStatus.isConnected = false;
-                } else if (error.response?.status === 400) {
+                    this.onDidDetectAuthFailureEmitter.fire();
+                } else if (status === 400) {
                     console.error('Bad request:', error.response?.data);
-                } else if (error.response?.status === 404) {
+                } else if (status === 404) {
                     console.error('Resource not found:', error.config?.url);
                 }
                 return Promise.reject(error);
             }
         );
+    }
+
+    /**
+     * Picks up a newer token without showing any UI. For Microsoft sign-in this asks VS Code
+     * for the session silently, which refreshes an expired access token when the refresh token
+     * is still valid. A PAT cannot be refreshed, but it may have been replaced from another
+     * window, so the stored secret is re-read. Returns true if a different token is now in use.
+     * Concurrent callers share one attempt.
+     */
+    public refreshSessionSilently(): Promise<boolean> {
+        if (!this.refreshInFlight) {
+            this.refreshInFlight = this.doRefreshSessionSilently().finally(() => {
+                this.refreshInFlight = undefined;
+            });
+        }
+        return this.refreshInFlight;
+    }
+
+    private async doRefreshSessionSilently(): Promise<boolean> {
+        const method = this.config?.authenticationMethod ?? this.getConfiguredAuthenticationMethod();
+        const previousToken = this.getActiveAccessToken();
+        try {
+            if (method === 'pat') {
+                const pat = await this.getOrMigratePat();
+                if (!pat || pat === previousToken) {
+                    return false;
+                }
+                this.applyAccessToken(this.createPatSession(pat));
+                return true;
+            }
+
+            const session = await vscode.authentication.getSession(
+                'microsoft',
+                await this.getMicrosoftScopes(),
+                { silent: true }
+            );
+            if (!session || session.accessToken === previousToken) {
+                return false;
+            }
+            this.applyAccessToken(session);
+            return true;
+        } catch (error) {
+            console.warn('[AuthManager] Silent token refresh failed:', error);
+            return false;
+        }
+    }
+
+    private applyAccessToken(session: vscode.AuthenticationSession): void {
+        this.session = session;
+        if (this.config) {
+            this.config.personalAccessToken = session.accessToken;
+        }
+        this.onDidChangeSessionEmitter.fire(session);
+    }
+
+    /**
+     * One cheap authenticated request that bypasses the interceptors, used by the
+     * background connection monitor.
+     */
+    public async probeConnection(timeoutMs = 10_000): Promise<ProbeResult> {
+        if (!this.config?.organizationUrl) {
+            return 'unreachable';
+        }
+        const token = this.getActiveAccessToken();
+        if (!token) {
+            return 'unauthorized';
+        }
+        try {
+            const response = await axios.get(`${this.config.organizationUrl}/_apis/connectionData`, {
+                headers: this.getAuthHeaders(token),
+                params: { 'api-version': '7.1-preview.1' },
+                timeout: timeoutMs,
+                maxRedirects: 0,
+                validateStatus: () => true
+            });
+            return classifyProbeStatus(response.status);
+        } catch {
+            // Network error, DNS failure or timeout.
+            return 'unreachable';
+        }
+    }
+
+    /**
+     * Tells the user their credentials stopped working and offers to fix it. Returns true
+     * if they signed in again or entered a new PAT.
+     */
+    public async promptReauthentication(): Promise<boolean> {
+        const method = this.config?.authenticationMethod ?? this.getConfiguredAuthenticationMethod();
+        if (method === 'pat') {
+            return this.promptForNewPat();
+        }
+
+        const signIn = 'Sign In';
+        const choice = await vscode.window.showWarningMessage(
+            'Your Azure DevOps sign-in has expired. Sign in again to keep your work items up to date.',
+            signIn
+        );
+        if (choice !== signIn) {
+            return false;
+        }
+
+        try {
+            const session = await vscode.authentication.getSession(
+                'microsoft',
+                await this.getMicrosoftScopes(),
+                { forceNewSession: true }
+            );
+            if (!session) {
+                return false;
+            }
+            await this.context.secrets.store('ado-session-id', session.id);
+            this.applyAccessToken(session);
+            if (!this.axiosInstance) {
+                await this.loadConfiguration();
+            }
+            vscode.commands.executeCommand('setContext', 'azureDevOps.signedIn', true);
+            return true;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`Failed to sign in to Azure DevOps: ${message}`);
+            return false;
+        }
+    }
+
+    private async promptForNewPat(): Promise<boolean> {
+        const enterToken = 'Enter New Token';
+        const openSettings = 'Create Token in Browser';
+        const choice = await vscode.window.showWarningMessage(
+            'Azure DevOps rejected your Personal Access Token. It may have expired or been revoked.',
+            enterToken,
+            openSettings
+        );
+        if (!choice) {
+            return false;
+        }
+        if (choice === openSettings && this.config?.organizationUrl) {
+            await vscode.env.openExternal(vscode.Uri.parse(`${this.config.organizationUrl}/_usersSettings/tokens`));
+        }
+
+        const input = await vscode.window.showInputBox({
+            prompt: 'Enter your new Azure DevOps Personal Access Token',
+            password: true,
+            ignoreFocusOut: true,
+            validateInput: (value) => value.trim() ? undefined : 'Personal Access Token is required'
+        });
+        const pat = input?.trim();
+        if (!pat) {
+            return false;
+        }
+
+        await this.context.secrets.store(AuthenticationManager.PAT_SECRET_KEY, pat);
+        if (this.config) {
+            this.applyAccessToken(this.createPatSession(pat));
+        } else {
+            await this.loadConfiguration();
+        }
+        return true;
     }
 
     public async autoConnect(): Promise<boolean> {
@@ -481,11 +662,7 @@ export class AuthenticationManager {
         try {
             const storedSessionId = await this.context.secrets.get('ado-session-id');
             if (storedSessionId) {
-                // Include tenant scope if user previously switched tenants
-                const storedTenantId = await this.context.secrets.get('ado-tenant-id');
-                const scopes = storedTenantId
-                    ? [...AuthenticationManager.SCOPES, `VSCODE_TENANT:${storedTenantId}`]
-                    : AuthenticationManager.SCOPES;
+                const scopes = await this.getMicrosoftScopes();
 
                 const session = await vscode.authentication.getSession(
                     'microsoft',
@@ -526,11 +703,9 @@ export class AuthenticationManager {
     public registerListeners(): vscode.Disposable[] {
         return [
             vscode.authentication.onDidChangeSessions(async (e) => {
-                if (e.provider.id === 'microsoft') {
-                    const storedTenantId = await this.context.secrets.get('ado-tenant-id');
-                    const scopes = storedTenantId
-                        ? [...AuthenticationManager.SCOPES, `VSCODE_TENANT:${storedTenantId}`]
-                        : AuthenticationManager.SCOPES;
+                // A PAT connection does not use the Microsoft session, so ignore its changes.
+                if (e.provider.id === 'microsoft' && this.getConfiguredAuthenticationMethod() === 'oauth') {
+                    const scopes = await this.getMicrosoftScopes();
                     const session = await vscode.authentication.getSession(
                         'microsoft',
                         scopes,

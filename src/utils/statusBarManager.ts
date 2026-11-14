@@ -6,6 +6,8 @@ export class StatusBarManager {
     private statusBarItem: vscode.StatusBarItem;
     private activeWorkItemService: ActiveWorkItemService | null = null;
     private timeUpdateInterval: NodeJS.Timeout | null = null;
+    /** While offline or signed out, keep that warning visible instead of the active work item. */
+    private connectionProblem = false;
 
     constructor() {
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -21,6 +23,9 @@ export class StatusBarManager {
 
         // Listen for active work item changes
         service.onDidChangeActiveWorkItem((workItem) => {
+            if (this.connectionProblem) {
+                return;
+            }
             if (workItem) {
                 this.showActiveWorkItem(workItem);
             } else {
@@ -35,7 +40,7 @@ export class StatusBarManager {
 
         this.timeUpdateInterval = setInterval(() => {
             const active = service.getActive();
-            if (active) {
+            if (active && !this.connectionProblem) {
                 this.showActiveWorkItem(active);
             }
         }, 60000); // Update every minute
@@ -44,9 +49,15 @@ export class StatusBarManager {
     /**
      * Update basic status (connected/disconnected)
      */
-    updateStatus(status: 'connected' | 'disconnected' | 'working', workItemId?: string): void {
+    updateStatus(status: 'connected' | 'disconnected' | 'offline' | 'authExpired' | 'working', workItemId?: string): void {
+        this.connectionProblem = status === 'offline' || status === 'authExpired';
         switch (status) {
-            case 'connected':
+            case 'connected': {
+                const active = this.activeWorkItemService?.getActive();
+                if (active) {
+                    this.showActiveWorkItem(active);
+                    break;
+                }
                 this.statusBarItem.text = '$(check) Azure DevOps';
                 this.statusBarItem.tooltip = new vscode.MarkdownString(
                     '**Azure DevOps**\n\nConnected and ready\n\n---\n\n' +
@@ -54,6 +65,21 @@ export class StatusBarManager {
                 );
                 this.statusBarItem.backgroundColor = undefined;
                 this.statusBarItem.command = 'azureDevOps.quickOpenWorkItem';
+                break;
+            }
+
+            case 'offline':
+                this.statusBarItem.text = '$(cloud-offline) Azure DevOps';
+                this.statusBarItem.tooltip = 'Azure DevOps cannot be reached. Retrying in the background; click to retry now.';
+                this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+                this.statusBarItem.command = 'azureDevOps.checkConnection';
+                break;
+
+            case 'authExpired':
+                this.statusBarItem.text = '$(warning) Azure DevOps: Sign in';
+                this.statusBarItem.tooltip = 'Your Azure DevOps credentials have expired. Click to sign in again.';
+                this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+                this.statusBarItem.command = 'azureDevOps.reauthenticate';
                 break;
 
             case 'disconnected':
