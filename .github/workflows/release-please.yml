@@ -1,0 +1,94 @@
+name: Release Please
+
+# On every push to main, release-please keeps a release pull request ("chore: release X.Y.Z")
+# up to date: it bumps package.json / package-lock.json from the Conventional Commits merged
+# since the last release and adds them to CHANGELOG.md. Nothing is released until you merge
+# that pull request. Merging it tags vX.Y.Z, creates the GitHub Release with the changelog
+# notes, and starts the Release workflow (release.yml), which builds, tests and attaches the
+# VSIX.
+#
+# The Marketplace stays off by default: set the repository variable MARKETPLACE_PUBLISH to
+# "true" to publish automatically, or run the Release workflow by hand on main with the tag
+# and "marketplace" ticked.
+#
+# Setup: Settings > Actions > General > "Allow GitHub Actions to create and approve pull
+# requests" must be on. Pull requests and pushes made with the default token don't start
+# pull_request workflows, so this workflow dispatches CI and the Conventional Commits check on
+# the release PR branch; their check runs land on its head commit, so required checks pass.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Update release PR or release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: write
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # release-please writes LF line endings; this repo keeps package.json, package-lock.json
+      # and CHANGELOG.md as CRLF, so convert them back on the release PR branch.
+      - name: Keep CRLF line endings on the release PR
+        if: steps.release.outputs.pr
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          path: release-pr
+
+      - name: Convert to CRLF and push
+        if: steps.release.outputs.pr
+        working-directory: release-pr
+        env:
+          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+        run: |
+          for f in package.json package-lock.json CHANGELOG.md; do
+            sed -i 's/\r*$/\r/' "$f"
+          done
+          if git diff --quiet; then
+            echo "Line endings already CRLF."; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: keep CRLF line endings"
+          git push origin "HEAD:$BRANCH"
+
+      # Run after the CRLF push so the checks are on the release PR's final head commit.
+      - name: Run CI and the Conventional Commits check on the release PR
+        if: steps.release.outputs.pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+        run: |
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          gh workflow run commitlint.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+
+      # Tags and releases made with the default token don't trigger the tag push in
+      # release.yml, so start it explicitly (workflow_dispatch is allowed).
+      - name: Start the Release workflow
+        if: steps.release.outputs.release_created
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          MARKETPLACE: ${{ vars.MARKETPLACE_PUBLISH == 'true' }}
+        run: |
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f tag="$TAG" -f marketplace="$MARKETPLACE"
+          echo "::notice::Started the Release workflow for $TAG (marketplace=$MARKETPLACE)."
