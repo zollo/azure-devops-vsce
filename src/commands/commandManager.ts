@@ -11,8 +11,7 @@ import { WorkItemPanel } from '../views/workItemPanel';
 import { WorkItemsListPanel } from '../views/workItemsListPanel';
 import { BoardPanel } from '../views/boardPanel';
 import { WorkItemTypeEnum } from '../models/workItem';
-import { ConnectionSetupWizard } from '../authentication/connectionSetupWizard';
-import { OrganizationManager } from '../authentication/organizationManager';
+import { OnboardingPanel } from '../onboarding/onboardingPanel';
 import { ConnectionStatusProvider } from '../authentication/connectionStatusProvider';
 
 import { WorkItemLinksManager } from '../utils/workItemLinksManager';
@@ -46,60 +45,37 @@ interface TeamMemberQuickPickItem extends vscode.QuickPickItem {
 }
 
 export function registerCommands(context: vscode.ExtensionContext, components: ExtensionComponents): void {
+    /** Called by the onboarding wizard after it saved the settings: connect and refresh every view. */
+    const completeOnboarding = async (): Promise<void> => {
+        await components.authenticationManager.refreshConfiguration();
+        const connected = components.authenticationManager.isConnected()
+            || await components.authenticationManager.autoConnect();
+        if (!connected) {
+            throw new Error('Could not connect to Azure DevOps with these settings.');
+        }
+        vscode.commands.executeCommand('setContext', 'azureDevOps.signedIn', true);
+        vscode.commands.executeCommand('setContext', 'azureDevOps.connected', true);
+        components.statusBarManager.updateStatus('connected');
+        components.workItemProvider.refresh();
+        components.backlogProvider.refresh();
+        components.boardProvider.refresh();
+        components.sprintProvider.refresh();
+        components.queryProvider.refresh();
+        components.connectionStatusProvider.refresh();
+    };
+    const openOnboarding = () => OnboardingPanel.show(context, completeOnboarding);
+
     const eventManager = WorkItemEventManager.getInstance();
 
     // Connect command
     context.subscriptions.push(
-        vscode.commands.registerCommand('azureDevOps.connect', async () => {
-            const connected = await components.authenticationManager.connect();
-            if (connected) {
-                // Set context for all views
-                vscode.commands.executeCommand('setContext', 'azureDevOps.connected', true);
-
-                components.statusBarManager.updateStatus('connected');
-                
-                // Refresh ALL views
-                components.workItemProvider.refresh();
-                components.backlogProvider.refresh();
-                components.boardProvider.refresh();
-                components.sprintProvider.refresh();
-                components.queryProvider.refresh();
-                components.connectionStatusProvider.refresh();
-            } else {
-                vscode.commands.executeCommand('setContext', 'azureDevOps.connected', false);
-            }
-        })
+        vscode.commands.registerCommand('azureDevOps.connect', () => openOnboarding())
     );
 
-    // Setup Wizard command
+    // The onboarding wizard replaces the old quick-pick setup; both IDs open it.
     context.subscriptions.push(
-        vscode.commands.registerCommand('azureDevOps.setupWizard', async () => {
-            try {
-                const wizard = new ConnectionSetupWizard(
-                    context,
-                    components.authenticationManager,
-                    new OrganizationManager(context)
-                );
-
-                const success = await wizard.runSetup();
-                if (success) {
-                    // Auto-connect after setup
-                    const connected = await components.authenticationManager.autoConnect();
-                    if (connected) {
-                        vscode.commands.executeCommand('setContext', 'azureDevOps.connected', true);
-                        components.statusBarManager.updateStatus('connected');
-                        components.workItemProvider.refresh();
-                        components.backlogProvider.refresh();
-                        components.boardProvider.refresh();
-                        components.sprintProvider.refresh();
-                        components.queryProvider.refresh();
-                        components.connectionStatusProvider.refresh();
-                    }
-                }
-            } catch (error: any) {
-                vscode.window.showErrorMessage(`Setup wizard error: ${error.message}`);
-            }
-        })
+        vscode.commands.registerCommand('azureDevOps.setupWizard', () => openOnboarding()),
+        vscode.commands.registerCommand('azureDevOps.getStarted', () => openOnboarding())
     );
 
     // Disconnect command

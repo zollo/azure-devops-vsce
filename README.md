@@ -69,21 +69,20 @@ Manage your Azure DevOps Boards, work items, sprints, and backlogs directly from
 ### Installation
 
 1. Install [ADO Boards](https://marketplace.visualstudio.com/items?itemName=zollo.azure-devops-boards) from the VS Code Marketplace
-2. Click the Azure DevOps icon in the Activity Bar
-3. Click "Sign In" to authenticate with your Microsoft account
-4. Select your Azure DevOps organization
-5. Select your project and team
-6. Start managing your work items!
+2. The **Get Started** tab opens. Choose how you sign in: Microsoft account (Entra ID, including your organization's SSO) or a personal access token
+3. Check the directory, organization, project and teams it detected (from your Git remote, existing settings and team membership) and click **Looks good to me**
+4. Start managing your work items!
+
+You can skip setup and come back any time with **Azure DevOps: Get Started**.
 
 ## Usage
 
 ### Authentication
 
-1. Open the Azure DevOps view from the Activity Bar
-2. Click "Sign In" in the Connection section
-3. Authenticate with your Microsoft account in the browser
-4. Return to VS Code - you're now connected!
-5. Complete the setup wizard to select your organization, project, and team
+1. Open the Azure DevOps view from the Activity Bar and click **Get Started**
+2. Pick **Microsoft account** (signs in through the browser) or **Personal access token**
+3. Review the detected directory (tenant), organization, project and teams; change anything that's wrong
+4. Click **Looks good to me**: you're connected
 
 ### Managing Work Items
 
@@ -141,16 +140,16 @@ Manage your Azure DevOps Boards, work items, sprints, and backlogs directly from
 ### Changing Organization/Project
 
 - Click the status bar item (bottom left) showing your connection
-- Or use Command Palette: "Azure DevOps: Setup Wizard"
-- Choose a different organization, project, or team
+- Or use Command Palette: "Azure DevOps: Get Started"
+- Choose a different directory, organization, project, or teams
 
 ## Commands
 
 Access these commands from the Command Palette (`Cmd+Shift+P` or `Ctrl+Shift+P`):
 
-- `Azure DevOps: Sign In to Azure DevOps` - Authenticate with Microsoft account
-- `Azure DevOps: Sign Out` - Sign out from Azure DevOps
-- `Azure DevOps: Setup Wizard` - Configure organization, project, and team
+- `Azure DevOps: Get Started` - Sign in and choose your organization, project and teams
+- `Azure DevOps: Connect to Organization` / `Azure DevOps: Setup Connection Wizard` - Open Get Started
+- `Azure DevOps: Disconnect` - Sign out from Azure DevOps
 - `Azure DevOps: Create Work Item` - Create a new work item
 - `Azure DevOps: Search Work Items` - Search for work items
 - `Azure DevOps: Open Board` - Open team board

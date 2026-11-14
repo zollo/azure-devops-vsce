@@ -281,6 +281,12 @@
         "icon": "$(settings-gear)"
       },
       {
+        "command": "azureDevOps.getStarted",
+        "title": "Get Started",
+        "category": "Azure DevOps",
+        "icon": "$(rocket)"
+      },
+      {
         "command": "azureDevOps.showWhatsNew",
         "title": "Show What's New",
         "category": "Azure DevOps",
@@ -339,7 +345,7 @@
     "viewsWelcome": [
       {
         "view": "azureDevOpsConnection",
-        "contents": "Welcome to Azure DevOps Boards!\n\n[$(sign-in) Sign In to Azure DevOps](command:azureDevOps.connect)\n\nConnect with your Microsoft account to manage work items, boards, and sprints.",
+        "contents": "Welcome to ADO Boards!\n\n[$(rocket) Get Started](command:azureDevOps.getStarted)\n\nSign in with your Microsoft account or a personal access token to manage work items, boards and sprints.",
         "when": "!azureDevOps.signedIn"
       },
       {
@@ -603,6 +609,14 @@
           "type": "string",
           "default": "",
           "description": "Default team to use"
+        },
+        "azureDevOps.teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Teams you work in, chosen during Get Started. The first one is the primary team and matches Default Team."
         },
         "azureDevOps.autoRefreshInterval": {
           "type": "number",

@@ -7,6 +7,12 @@ All notable changes to the ADO Boards extension (formerly Azure DevOps Boards) w
 ### Added
 - Background connection check (every 2 minutes by default, paused while VS Code is not focused; `azureDevOps.connectionCheckInterval`, 0 to disable). The status bar shows when Azure DevOps is unreachable or your sign-in has expired, and views reload when the connection comes back
 - **Check Connection** and **Sign In Again** commands
+- **Get Started** wizard: a tab that opens after installation (when nothing is configured) with a welcome, a feature overview and a choice of Microsoft account (Entra ID, including SSO) or personal access token sign-in. After sign-in it fills in the directory (tenant), organization, project and teams it detects from your Git remote, existing settings and team membership; review them and click **Looks good to me**, or skip setup
+- Pick more than one team (`azureDevOps.teams`); the primary team is used for boards, backlogs and sprints (`azureDevOps.defaultTeam`)
+- **Get Started** command
+
+### Changed
+- **Connect to Organization** and **Setup Connection Wizard** open Get Started instead of a series of quick picks
 
 ### Fixed
 - An expired Microsoft sign-in token is now refreshed silently and the failed request retried, instead of failing with an authentication error
