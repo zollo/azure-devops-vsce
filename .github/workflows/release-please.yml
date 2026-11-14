@@ -12,9 +12,9 @@ name: Release Please
 # and "marketplace" ticked.
 #
 # Setup: Settings > Actions > General > "Allow GitHub Actions to create and approve pull
-# requests" must be on. Pull requests opened with the default token don't start other
-# workflows, so CI doesn't run on the release PR; the Release workflow runs the full checks
-# before anything ships.
+# requests" must be on. Pull requests and pushes made with the default token don't start
+# pull_request workflows, so this workflow dispatches CI and the Conventional Commits check on
+# the release PR branch; their check runs land on its head commit, so required checks pass.
 
 on:
   push:
@@ -69,6 +69,16 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "chore: keep CRLF line endings"
           git push origin "HEAD:$BRANCH"
+
+      # Run after the CRLF push so the checks are on the release PR's final head commit.
+      - name: Run CI and the Conventional Commits check on the release PR
+        if: steps.release.outputs.pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+        run: |
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          gh workflow run commitlint.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
 
       # Tags and releases made with the default token don't trigger the tag push in
       # release.yml, so start it explicitly (workflow_dispatch is allowed).
