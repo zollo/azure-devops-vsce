@@ -12,7 +12,21 @@ npm ci
 npm run build      # bundle to dist/ (use `npm run watch` while developing)
 ```
 
-Press **F5** in VS Code to launch an Extension Development Host with the extension loaded.
+Open the folder in VS Code and install the recommended extensions when prompted
+(`.vscode/extensions.json`). Then:
+
+- **F5** (*Run Extension*) starts the `watch` task and opens an Extension Development Host.
+  *Run Extension (clean profile)* does the same with other extensions disabled.
+- **Ctrl+Shift+B** starts the `watch` task on its own (esbuild bundle plus type-check).
+- **Testing view**: integration tests (`src/test/integration`, run inside VS Code via
+  `.vscode-test.mjs`) appear through the Extension Test Runner, and unit tests (`src/test/unit`,
+  plain `node:test`) through the Node.js Test Runner. You can run or debug single tests from
+  either, and the Extension Test Runner can also run with coverage.
+  Run the `watch-tests` task first so `dist/` and `out/` stay current while you edit.
+- **Run and Debug**: *Extension Tests* and *Unit Tests* launch the same suites under the debugger,
+  so breakpoints in `src/` work.
+
+More detail (troubleshooting, which test type to write): [developer guide](https://app.notion.com/p/4181d6dd324881bc9670d7089424fcbb).
 
 ## Before opening a pull request
 
@@ -20,6 +34,7 @@ Press **F5** in VS Code to launch an Extension Development Host with the extensi
 npm run lint               # must report 0 errors
 npm test                   # unit tests
 npm run test:integration   # smoke tests inside VS Code (on Linux: xvfb-run -a npm run test:integration)
+npm run test:coverage      # optional: integration tests with a coverage report in coverage/
 ```
 
 CI runs the same checks on every pull request.

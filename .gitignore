@@ -6,8 +6,12 @@ out/
 dist/
 *.vsix
 
-# Development files
-.vscode/
+# Development files (shared launch, task and test settings are committed)
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/tasks.json
 .vscode-test/
 *.code-workspace
 

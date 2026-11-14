@@ -1,0 +1,8 @@
+{
+    // Recommended extensions for working on ADO Boards. See CONTRIBUTING.md.
+    "recommendations": [
+        "dbaeumer.vscode-eslint",
+        "ms-vscode.extension-test-runner",
+        "connor4312.nodejs-testing"
+    ]
+}

@@ -1,0 +1,19 @@
+{
+    // Build output: hide from search, keep visible in the explorer.
+    "search.exclude": {
+        "out": true,
+        "dist": true,
+        ".vscode-test": true
+    },
+    // The npm watch tasks in tasks.json replace VS Code's auto-detected tsc tasks.
+    "typescript.tsc.autoDetect": "off",
+
+    // Unit tests (node:test) in the Testing view, via the Node.js Test Runner extension.
+    // Integration tests come from .vscode-test.mjs via the Extension Test Runner extension.
+    "nodejs-testing.include": ["./out/test/unit"],
+    "nodejs-testing.pretest": ["npm", "run", "compile"],
+    "nodejs-testing.debugOptions": {
+        "skipFiles": ["<node_internals>/**"],
+        "outFiles": ["${workspaceFolder}/out/**/*.js"]
+    }
+}
