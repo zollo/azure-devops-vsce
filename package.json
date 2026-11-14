@@ -669,6 +669,52 @@
           "minimum": 10,
           "maximum": 1000,
           "description": "Maximum number of work items to load in the tree view"
+        },
+        "azureDevOps.workItemsView.columns": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "id",
+              "type",
+              "title",
+              "state",
+              "assignedTo",
+              "areaPath",
+              "iterationPath",
+              "tags",
+              "priority",
+              "comments",
+              "changedDate",
+              "createdDate"
+            ],
+            "enumDescriptions": [
+              "Work item ID",
+              "Work item type",
+              "Title (always shown)",
+              "State",
+              "Assigned to",
+              "Area path",
+              "Iteration path",
+              "Tags",
+              "Priority",
+              "Comment count",
+              "Activity date (last changed)",
+              "Created date"
+            ]
+          },
+          "default": [
+            "id",
+            "title",
+            "state",
+            "assignedTo",
+            "areaPath",
+            "tags",
+            "comments",
+            "changedDate"
+          ],
+          "markdownDescription": "Columns shown in the Work Items view, in a fixed order. You can also pick them with the **Columns** button in the view. Title is always shown."
         }
       }
     }
