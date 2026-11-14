@@ -1,3 +1,6 @@
+<!-- Title: a Conventional Commit, e.g. "feat: add sprint filter" or "fix(boards): keep column order".
+     fix = patch release, feat = minor, "feat!:" or a BREAKING CHANGE footer = breaking. -->
+
 ## What and why
 
 <!-- What does this change, and why? Link any related issue. -->
@@ -10,5 +13,5 @@
 
 ## Checklist
 
-- [ ] User-visible changes are noted in `CHANGELOG.md` under Unreleased
+- [ ] Title and commits follow [Conventional Commits](https://www.conventionalcommits.org) (they become the CHANGELOG)
 - [ ] Azure DevOps data shown in webviews goes through the helpers in `src/utils/webviewSecurity.ts`

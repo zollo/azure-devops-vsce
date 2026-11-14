@@ -15,6 +15,10 @@ package-lock.json
 esbuild.js
 eslint.config.mjs
 .vscode-test.mjs
+.githooks/**
+commitlint.config.mjs
+release-please-config.json
+.release-please-manifest.json
 **/*.ts
 **/*.map
 **/.DS_Store
