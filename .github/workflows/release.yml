@@ -3,6 +3,11 @@ name: Release
 # Push a tag like v0.3.0 (matching package.json "version") to build the VSIX once,
 # attach it to a GitHub Release and publish the same file to the VS Code Marketplace.
 #
+# Or run it from the Actions tab (workflow_dispatch) on main with a tag name. If the tag does
+# not exist yet, the release creates it at the commit the run was started from. Leave
+# "marketplace" unticked to make a GitHub Release only; run it again later with it ticked to
+# publish the same VSIX to the Marketplace.
+#
 # Setup:
 #   Marketplace trusted publishing: on the publisher's page at
 #   https://marketplace.visualstudio.com/manage, add a GitHub Actions trusted publisher for
@@ -17,8 +22,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing tag to release (e.g. v0.3.0)
+        description: Tag to release (e.g. v0.3.0); created at this commit if it does not exist
         required: true
+      marketplace:
+        description: Also publish to the VS Code Marketplace (and Open VSX if configured)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -34,10 +43,29 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       vsix: ${{ steps.version.outputs.vsix }}
+      sha: ${{ steps.source.outputs.sha }}
     steps:
       - uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.tag || github.ref }}
+
+      # A manual run builds the existing tag if there is one, otherwise the commit it was run on.
+      - name: Select the commit to release
+        id: source
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            # Exit status 2 means "no such tag"; any other failure must stop the run, so a
+            # lookup error never releases the dispatch commit under an existing tag.
+            status=0
+            git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null || status=$?
+            if [ "$status" -eq 0 ]; then
+              git fetch --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+              git checkout --detach "$TAG"
+            elif [ "$status" -ne 2 ]; then
+              echo "::error::Could not look up tag $TAG (git ls-remote exit $status)"; exit 1
+            fi
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v5
         with:
@@ -97,6 +125,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
           VSIX: ${{ needs.build.outputs.vsix }}
+          SHA: ${{ needs.build.outputs.sha }}
         run: |
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qxF "$VSIX"; then
@@ -110,12 +139,13 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --title "ADO Boards $TAG" \
               --notes "See [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/$TAG/CHANGELOG.md) for details. ADO Boards is a community fork of Azure DevOps Boards by Damilola Onadeinde." \
-              --verify-tag
+              --target "$SHA"
           fi
 
   marketplace:
     name: Publish to VS Code Marketplace
     needs: [build, github-release]
+    if: github.event_name == 'push' || inputs.marketplace
     runs-on: ubuntu-latest
     environment: marketplace
     permissions:
@@ -140,6 +170,7 @@ jobs:
   open-vsx:
     name: Publish to Open VSX (optional)
     needs: [build, github-release]
+    if: github.event_name == 'push' || inputs.marketplace
     runs-on: ubuntu-latest
     environment: marketplace
     permissions:

@@ -836,7 +836,7 @@ export class WhatsNewPanel {
                                     </div>
                                     <div class="feature-text">
                                         <h4>Safer Token Storage</h4>
-                                        <p>Personal Access Tokens are now kept in VS Code SecretStorage and are moved out of your settings automatically.</p>
+                                        <p>Personal Access Tokens are now kept in VS Code SecretStorage. When you sign in with a PAT, a token saved in your settings is moved there automatically.</p>
                                     </div>
                                     <div class="hover-dot"><div class="hover-dot-inner"></div></div>
                                 </div>
