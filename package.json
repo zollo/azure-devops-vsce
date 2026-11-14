@@ -41,6 +41,18 @@
         "icon": "$(debug-disconnect)"
       },
       {
+        "command": "azureDevOps.checkConnection",
+        "title": "Check Connection",
+        "category": "Azure DevOps",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "azureDevOps.reauthenticate",
+        "title": "Sign In Again",
+        "category": "Azure DevOps",
+        "icon": "$(key)"
+      },
+      {
         "command": "azureDevOps.createWorkItem",
         "title": "Create Work Item",
         "category": "Azure DevOps",
@@ -598,6 +610,12 @@
           "minimum": 0,
           "description": "Auto-refresh interval in seconds (0 to disable)"
         },
+        "azureDevOps.connectionCheckInterval": {
+          "type": "number",
+          "default": 120,
+          "minimum": 0,
+          "description": "How often, in seconds, to check in the background that Azure DevOps is reachable and your sign-in is still valid (0 to disable). Checks pause while VS Code is not focused."
+        },
         "azureDevOps.showNotifications": {
           "type": "boolean",
           "default": true,
@@ -642,11 +660,14 @@
     "check-types": "tsc -p ./ --noEmit",
     "build": "node esbuild.js",
     "watch": "node esbuild.js --watch",
+    "watch:tsc": "tsc -p ./ --noEmit --watch",
+    "watch:tests": "tsc -p ./ --watch",
     "package": "npm run check-types && node esbuild.js --production",
     "lint": "eslint .",
     "test": "npm run test:unit",
     "test:unit": "npm run compile && node --test out/test/unit/*.test.js",
     "test:integration": "npm run compile && npm run build && vscode-test",
+    "test:coverage": "npm run compile && npm run build && vscode-test --coverage",
     "hooks:install": "git config core.hooksPath .githooks"
   },
   "devDependencies": {

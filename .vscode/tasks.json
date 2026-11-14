@@ -1,0 +1,76 @@
+// Build and watch tasks used by launch.json and the test runners.
+// See https://go.microsoft.com/fwlink/?LinkId=733558
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            // Default build task (Ctrl+Shift+B): bundle with esbuild and type-check, both in watch mode.
+            "label": "watch",
+            "dependsOn": ["npm: watch", "npm: watch:tsc"],
+            "dependsOrder": "parallel",
+            "presentation": { "reveal": "never" },
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": []
+        },
+        {
+            // Bundle to dist/ and compile the tests to out/, both in watch mode. Used before running tests.
+            "label": "watch-tests",
+            "dependsOn": ["npm: watch", "npm: watch:tests"],
+            "dependsOrder": "parallel",
+            "presentation": { "reveal": "never" },
+            "group": "test",
+            "problemMatcher": []
+        },
+        {
+            "type": "npm",
+            "script": "watch",
+            "label": "npm: watch",
+            "group": "build",
+            "isBackground": true,
+            // Defined inline (rather than "$esbuild-watch") so no extra extension is needed.
+            // Matches the output of esbuild.js: "[watch] build started/finished" and
+            // "✘ [ERROR] message" followed by "    file:line:column:".
+            "problemMatcher": {
+                "owner": "esbuild",
+                "source": "esbuild",
+                "fileLocation": ["relative", "${workspaceFolder}"],
+                "pattern": [
+                    { "regexp": "^✘ \\[ERROR\\] (.*)$", "message": 1 },
+                    { "regexp": "^\\s+(.*):(\\d+):(\\d+):$", "file": 1, "line": 2, "column": 3 }
+                ],
+                "background": {
+                    "activeBegin": true,
+                    "beginsPattern": "^\\[watch\\] build started",
+                    "endsPattern": "^\\[watch\\] build finished"
+                }
+            },
+            "presentation": { "group": "watch", "reveal": "never" }
+        },
+        {
+            "type": "npm",
+            "script": "watch:tsc",
+            "label": "npm: watch:tsc",
+            "group": "build",
+            "isBackground": true,
+            "problemMatcher": "$tsc-watch",
+            "presentation": { "group": "watch", "reveal": "never" }
+        },
+        {
+            "type": "npm",
+            "script": "watch:tests",
+            "label": "npm: watch:tests",
+            "group": "build",
+            "isBackground": true,
+            "problemMatcher": "$tsc-watch",
+            "presentation": { "group": "watch", "reveal": "never" }
+        },
+        {
+            "type": "npm",
+            "script": "compile",
+            "label": "npm: compile",
+            "group": "build",
+            "problemMatcher": "$tsc",
+            "presentation": { "reveal": "silent" }
+        }
+    ]
+}

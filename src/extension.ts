@@ -14,6 +14,7 @@ import { WhatsNewPanel } from './views/whatsNewPanel';
 import { SearchService } from './services/searchService';
 import { ActiveWorkItemService } from './services/activeWorkItemService';
 import { detectOriginalExtensionConflict } from './utils/conflictDetection';
+import { startConnectionMonitor } from './authentication/connectionMonitorSetup';
 
 export let authenticationManager: AuthenticationManager;
 export let workItemProvider: WorkItemProvider;
@@ -193,6 +194,17 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.executeCommand('setContext', 'azureDevOps.connected', false);
         statusBarManager.updateStatus('disconnected');
     }
+
+    // Watch the connection in the background: refresh expired tokens silently, ask the
+    // user to sign in again when that is not possible, and recover after outages.
+    startConnectionMonitor(context, authenticationManager, statusBarManager, () => {
+        workItemProvider.refresh();
+        backlogProvider.refresh();
+        boardProvider.refresh();
+        sprintProvider.refresh();
+        queryProvider.refresh();
+        connectionStatusProvider.refresh();
+    });
 
     console.log('Azure DevOps Boards extension initialized successfully');
 }
