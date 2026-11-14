@@ -10,7 +10,6 @@ import { registerCommands } from './commands/commandManager';
 import { GitIntegration } from './gitIntegration/gitIntegration';
 import { StatusBarManager } from './utils/statusBarManager';
 import { WorkItemLinksManager } from './utils/workItemLinksManager';
-import { WhatsNewPanel } from './views/whatsNewPanel';
 import { SearchService } from './services/searchService';
 import { ActiveWorkItemService } from './services/activeWorkItemService';
 import { detectOriginalExtensionConflict } from './utils/conflictDetection';
@@ -103,13 +102,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(workItemsTreeView, backlogsTreeView, boardsTreeView, sprintsTreeView, queriesTreeView);
 
-    // Register What's New command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('azureDevOps.showWhatsNew', async () => {
-            await WhatsNewPanel.forceShow(context);
-        })
-    );
-
     // Register commands
     registerCommands(context, {
         authenticationManager,
@@ -183,9 +175,6 @@ export async function activate(context: vscode.ExtensionContext) {
             sprintProvider.refresh();
             queryProvider.refresh();
             connectionStatusProvider.refresh();
-
-            // Check and show what's new
-            await WhatsNewPanel.show(context);
         } else {
             vscode.commands.executeCommand('setContext', 'azureDevOps.connected', false);
             statusBarManager.updateStatus('disconnected');
@@ -207,9 +196,13 @@ export async function activate(context: vscode.ExtensionContext) {
         connectionStatusProvider.refresh();
     });
 
-    // First run: open the onboarding wizard when nothing is configured yet.
-    if (!authenticationManager.isConnected() && OnboardingPanel.shouldShowOnStartup(context)) {
+    // New installs and empty configurations get the Get Started wizard (with What's new);
+    // configured users get only What's new, once per release.
+    const startupView = OnboardingPanel.startupView(context);
+    if (startupView === 'onboarding') {
         vscode.commands.executeCommand('azureDevOps.getStarted');
+    } else if (startupView === 'whatsNew') {
+        vscode.commands.executeCommand('azureDevOps.showWhatsNew');
     }
 
     console.log('Azure DevOps Boards extension initialized successfully');

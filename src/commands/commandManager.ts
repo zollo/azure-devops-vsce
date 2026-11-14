@@ -75,7 +75,8 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
     // The onboarding wizard replaces the old quick-pick setup; both IDs open it.
     context.subscriptions.push(
         vscode.commands.registerCommand('azureDevOps.setupWizard', () => openOnboarding()),
-        vscode.commands.registerCommand('azureDevOps.getStarted', () => openOnboarding())
+        vscode.commands.registerCommand('azureDevOps.getStarted', () => openOnboarding()),
+        vscode.commands.registerCommand('azureDevOps.showWhatsNew', () => OnboardingPanel.show(context, completeOnboarding, 'whatsNew'))
     );
 
     // Disconnect command

@@ -25,9 +25,10 @@ import {
     Team,
     Tenant
 } from './discovery';
+import { RELEASE_NOTES, ReleaseNotes } from './releaseNotes';
 
 export type AuthMethod = 'microsoft' | 'pat';
-export type Step = 'welcome' | 'signingIn' | 'pat' | 'review' | 'saving' | 'done';
+export type Step = 'whatsNew' | 'welcome' | 'signingIn' | 'pat' | 'review' | 'saving' | 'done';
 
 export interface MicrosoftSession {
     id: string;
@@ -68,6 +69,8 @@ export interface OnboardingDeps {
 
 export interface OnboardingState {
     step: Step;
+    /** Highlights of the current release, shown on the welcome and What's new steps. */
+    release: ReleaseNotes;
     authMethod?: AuthMethod;
     account?: string;
     error?: string;
@@ -93,9 +96,10 @@ export interface OnboardingState {
     patOrganizationHint?: string;
 }
 
-export function initialState(): OnboardingState {
+export function initialState(release: ReleaseNotes = RELEASE_NOTES, step: Step = 'welcome'): OnboardingState {
     return {
-        step: 'welcome',
+        step,
+        release,
         tenants: [],
         canFindTenants: false,
         organizations: [],
@@ -119,7 +123,8 @@ export type WebviewMessage =
     | { type: 'selectProject'; projectId: string }
     | { type: 'setTeams'; teamIds: string[]; primaryTeamId?: string }
     | { type: 'finish' }
-    | { type: 'dismiss' };
+    | { type: 'dismiss' }
+    | { type: 'startOnboarding' };
 
 function errorMessage(error: unknown): string {
     const anyError = error as any;
@@ -135,7 +140,7 @@ function errorMessage(error: unknown): string {
 }
 
 export class OnboardingController {
-    private state: OnboardingState = initialState();
+    private state: OnboardingState;
     private hints: Promise<Hints>;
     private http: HttpGet | undefined;
     private session: MicrosoftSession | undefined;
@@ -146,7 +151,11 @@ export class OnboardingController {
     /** Increments on every sign-in attempt and on Back, so a sign-in that finishes late is ignored. */
     private authAttempt = 0;
 
-    constructor(private readonly deps: OnboardingDeps) {
+    constructor(
+        private readonly deps: OnboardingDeps,
+        private readonly options: { release?: ReleaseNotes; startWith?: 'onboarding' | 'whatsNew' } = {}
+    ) {
+        this.state = initialState(options.release, options.startWith === 'whatsNew' ? 'whatsNew' : 'welcome');
         this.hints = deps.getHints().catch(error => {
             deps.log(`Could not read workspace hints: ${errorMessage(error)}`);
             return { remotes: [] };
@@ -178,6 +187,7 @@ export class OnboardingController {
                 case 'setTeams': return this.setTeams(message.teamIds, message.primaryTeamId);
                 case 'finish': return await this.finish();
                 case 'dismiss': this.deps.dismiss(); return;
+                case 'startOnboarding': this.back(); return;
             }
         } catch (error) {
             this.deps.log(`Onboarding: ${errorMessage(error)}`);
@@ -191,7 +201,7 @@ export class OnboardingController {
         this.http = undefined;
         this.session = undefined;
         this.pat = undefined;
-        this.state = initialState();
+        this.state = initialState(this.options.release);
         this.deps.post(this.state);
     }
 

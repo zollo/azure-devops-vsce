@@ -116,6 +116,39 @@ a {
     color: var(--muted);
 }
 
+/* What's new */
+
+.whats-new-summary h2 .codicon,
+.whats-new-group h2 .codicon {
+    color: var(--accent);
+    vertical-align: -2px;
+}
+
+.highlights {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 4px 20px;
+}
+
+.highlight.compact {
+    display: flex;
+    gap: 10px;
+    padding: 6px 0;
+}
+
+.highlight.compact > .codicon {
+    margin-top: 2px;
+    color: var(--accent);
+}
+
+.highlight p {
+    color: var(--muted);
+}
+
+.footer a {
+    color: var(--accent);
+}
+
 /* Authentication choices */
 
 .choices {

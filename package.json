@@ -284,7 +284,7 @@
         "command": "azureDevOps.getStarted",
         "title": "Get Started",
         "category": "Azure DevOps",
-        "icon": "$(rocket)"
+        "icon": "$(settings-gear)"
       },
       {
         "command": "azureDevOps.showWhatsNew",
@@ -385,13 +385,18 @@
     "menus": {
       "view/title": [
         {
+          "command": "azureDevOps.getStarted",
+          "when": "view == azureDevOpsConnection && azureDevOps.signedIn",
+          "group": "navigation@1"
+        },
+        {
           "command": "azureDevOps.disconnect",
-          "when": "view == azureDevOpsConnection && azureDevOps.connected",
-          "group": "navigation"
+          "when": "view == azureDevOpsConnection && azureDevOps.signedIn",
+          "group": "navigation@2"
         },
         {
           "command": "azureDevOps.connect",
-          "when": "view == azureDevOpsConnection && !azureDevOps.connected",
+          "when": "view == azureDevOpsConnection && !azureDevOps.signedIn",
           "group": "navigation"
         },
         {
