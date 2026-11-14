@@ -25,6 +25,42 @@
     const send = (/** @type {any} */ message) => vscode.postMessage(message);
 
     /**
+     * Sets one of the attributes this page uses. Attribute names are fixed here, so data can
+     * never become an event handler or a script URL; unknown names are ignored.
+     * @param {HTMLElement} el
+     * @param {string} name
+     * @param {string} value
+     */
+    function setAttribute(el, name, value) {
+        switch (name) {
+            case 'id': el.setAttribute('id', value); break;
+            case 'type': el.setAttribute('type', value); break;
+            case 'for': el.setAttribute('for', value); break;
+            case 'role': el.setAttribute('role', value); break;
+            case 'title': el.setAttribute('title', value); break;
+            case 'alt': el.setAttribute('alt', value); break;
+            case 'width': el.setAttribute('width', value); break;
+            case 'height': el.setAttribute('height', value); break;
+            case 'placeholder': el.setAttribute('placeholder', value); break;
+            case 'autocomplete': el.setAttribute('autocomplete', value); break;
+            case 'spellcheck': el.setAttribute('spellcheck', value); break;
+            case 'disabled': el.setAttribute('disabled', ''); break;
+            case 'selected': el.setAttribute('selected', ''); break;
+            case 'aria-hidden': el.setAttribute('aria-hidden', value); break;
+            case 'aria-label': el.setAttribute('aria-label', value); break;
+            case 'aria-pressed': el.setAttribute('aria-pressed', value); break;
+            case 'data-keep': el.setAttribute('data-keep', ''); break;
+            case 'src':
+            case 'href':
+                // Only the extension's own files and https links.
+                if (/^(https:|vscode-webview:|vscode-resource:|file:)/i.test(value)) {
+                    el.setAttribute(name === 'src' ? 'src' : 'href', value);
+                }
+                break;
+        }
+    }
+
+    /**
      * Small DOM builder. Attributes starting with "on" become listeners; children may be
      * strings (inserted as text), nodes, arrays or falsy values (skipped).
      * @param {string} tag
@@ -46,9 +82,8 @@
                 /** @type {any} */ (el).value = value;
             } else if (key === 'checked') {
                 /** @type {any} */ (el).checked = !!value;
-            } else if (!key.toLowerCase().startsWith('on')) {
-                // Never set event-handler attributes from strings.
-                el.setAttribute(key, value === true ? '' : String(value));
+            } else {
+                setAttribute(el, key, value === true ? '' : String(value));
             }
         }
         const add = (/** @type {any} */ child) => {
