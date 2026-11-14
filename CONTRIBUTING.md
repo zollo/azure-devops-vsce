@@ -26,6 +26,8 @@ Open the folder in VS Code and install the recommended extensions when prompted
 - **Run and Debug**: *Extension Tests* and *Unit Tests* launch the same suites under the debugger,
   so breakpoints in `src/` work.
 
+More detail (troubleshooting, which test type to write): [developer guide](https://app.notion.com/p/4181d6dd324881bc9670d7089424fcbb).
+
 ## Before opening a pull request
 
 ```bash
