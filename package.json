@@ -642,11 +642,14 @@
     "check-types": "tsc -p ./ --noEmit",
     "build": "node esbuild.js",
     "watch": "node esbuild.js --watch",
+    "watch:tsc": "tsc -p ./ --noEmit --watch",
+    "watch:tests": "tsc -p ./ --watch",
     "package": "npm run check-types && node esbuild.js --production",
     "lint": "eslint .",
     "test": "npm run test:unit",
     "test:unit": "npm run compile && node --test out/test/unit/*.test.js",
-    "test:integration": "npm run compile && npm run build && vscode-test"
+    "test:integration": "npm run compile && npm run build && vscode-test",
+    "test:coverage": "npm run compile && npm run build && vscode-test --coverage"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

@@ -6,5 +6,6 @@ export default defineConfig({
     files: 'out/test/integration/**/*.test.js',
     version: '1.101.0',
     launchArgs: ['--disable-extensions'],
+    label: 'integration',
     mocha: { ui: 'tdd', timeout: 60000 }
 });

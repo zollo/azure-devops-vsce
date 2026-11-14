@@ -1,0 +1,50 @@
+// See https://go.microsoft.com/fwlink/?linkid=830387
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            // F5: open an Extension Development Host with the extension loaded from dist/.
+            "name": "Run Extension",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+            "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+            "preLaunchTask": "${defaultBuildTask}"
+        },
+        {
+            // Same as above, but with every other extension disabled and a throwaway profile.
+            "name": "Run Extension (clean profile)",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}",
+                "--disable-extensions",
+                "--profile-temp"
+            ],
+            "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+            "preLaunchTask": "${defaultBuildTask}"
+        },
+        {
+            // Debug the integration tests (src/test/integration) in VS Code, using .vscode-test.mjs.
+            "name": "Extension Tests",
+            "type": "extensionHost",
+            "request": "launch",
+            "testConfiguration": "${workspaceFolder}/.vscode-test.mjs",
+            "args": ["--extensionDevelopmentPath=${workspaceFolder}", "--disable-extensions"],
+            "outFiles": ["${workspaceFolder}/dist/**/*.js", "${workspaceFolder}/out/**/*.js"],
+            "preLaunchTask": "watch-tests"
+        },
+        {
+            // Debug the unit tests (src/test/unit) in plain Node.js.
+            "name": "Unit Tests",
+            "type": "node",
+            "request": "launch",
+            "runtimeArgs": ["--test", "--enable-source-maps", "out/test/unit/*.test.js"],
+            "cwd": "${workspaceFolder}",
+            "outFiles": ["${workspaceFolder}/out/**/*.js"],
+            "skipFiles": ["<node_internals>/**"],
+            "console": "integratedTerminal",
+            "preLaunchTask": "npm: compile"
+        }
+    ]
+}
