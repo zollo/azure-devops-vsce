@@ -348,6 +348,9 @@ export interface RemoteInfo {
     project: string;
 }
 
+/** Azure DevOps Services organization names: letters, digits and hyphens. */
+const ORG_NAME = /^[a-z0-9][a-z0-9-]{0,49}$/i;
+
 function decode(segment: string): string {
     try {
         return decodeURIComponent(segment);
@@ -370,6 +373,11 @@ export function parseAzureReposRemote(remote: string): RemoteInfo | undefined {
     if (ssh) {
         const legacyHost = ssh[1].toLowerCase() === 'vs-ssh.visualstudio.com';
         const organization = decode(ssh[2]);
+        // The organization name becomes a host or path; reject anything else so a crafted
+        // remote can't point the wizard (and its credentials) at another server.
+        if (!ORG_NAME.test(organization)) {
+            return undefined;
+        }
         return {
             organization,
             organizationUrl: legacyHost ? `https://${organization.toLowerCase()}.visualstudio.com` : `https://dev.azure.com/${organization}`,
@@ -392,6 +400,9 @@ export function parseAzureReposRemote(remote: string): RemoteInfo | undefined {
     if (host === 'dev.azure.com') {
         // /{org}/{project}/_git/{repo}; a repo named like its project may omit the project.
         const organization = decode(segments[0]);
+        if (!ORG_NAME.test(organization)) {
+            return undefined;
+        }
         const project = gitIndex >= 2 ? decode(segments[gitIndex - 1]) : decode(segments[gitIndex + 1] ?? '');
         return project ? { organization, organizationUrl: `https://dev.azure.com/${organization}`, project } : undefined;
     }
@@ -434,9 +445,26 @@ export interface Hints {
     teams?: string[];
 }
 
-function sameOrg(a: string, b: string): boolean {
-    return normalizeOrganizationUrl(a)?.toLowerCase() === normalizeOrganizationUrl(b)?.toLowerCase();
+/**
+ * A key that is the same for both URL forms of an Azure DevOps Services organization
+ * (dev.azure.com/{org} and {org}.visualstudio.com). Server collection URLs stay as they are.
+ */
+export function organizationKey(url: string): string | undefined {
+    const normalized = normalizeOrganizationUrl(url);
+    if (!normalized) {
+        return undefined;
+    }
+    const services = /^https:\/\/dev\.azure\.com\/([^/]+)$/i.exec(normalized)
+        || /^https:\/\/([^./]+)\.visualstudio\.com$/i.exec(normalized);
+    return services ? `services:${services[1].toLowerCase()}` : normalized.toLowerCase();
 }
+
+export function sameOrganization(a: string, b: string): boolean {
+    const key = organizationKey(a);
+    return key !== undefined && key === organizationKey(b);
+}
+
+const sameOrg = sameOrganization;
 
 /** Picks the organization to preselect: Git remote, then saved settings, then the only one, then the first. */
 export function suggestOrganization(orgs: Organization[], hints: Hints): Suggestion<Organization> {

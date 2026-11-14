@@ -9,6 +9,7 @@ import {
     mergeTeams,
     normalizeOrganizationUrl,
     normalizeTenantInput,
+    organizationKey,
     organizationNameFromUrl,
     parseAzureReposRemote,
     parseOrganizations,
@@ -251,4 +252,19 @@ test('still lists teams when the membership query fails', async () => {
     const result = await fetchTeams(get, 'https://dev.azure.com/o', 'p');
     assert.equal(result.membershipKnown, false);
     assert.deepEqual(result.teams, [{ id: 'a', name: 'A', description: undefined, isMember: false, isDefault: false }]);
+});
+
+test('rejects remotes whose organization is not a plain name', () => {
+    assert.equal(parseAzureReposRemote('contoso@vs-ssh.visualstudio.com:v3/attacker.example%2Fcollection/App/repo'), undefined);
+    assert.equal(parseAzureReposRemote('git@ssh.dev.azure.com:v3/evil.example%3A443/App/repo'), undefined);
+    assert.equal(parseAzureReposRemote('https://dev.azure.com/a%2F..%2Fevil.example/App/_git/r'), undefined);
+});
+
+test('treats both Azure DevOps Services URL forms as the same organization', () => {
+    assert.equal(organizationKey('https://dev.azure.com/Contoso'), organizationKey('https://contoso.visualstudio.com/'));
+    assert.notEqual(organizationKey('https://dev.azure.com/contoso'), organizationKey('https://dev.azure.com/fabrikam'));
+    assert.equal(organizationKey('https://tfs.example.com/tfs/Coll/'), 'https://tfs.example.com/tfs/coll');
+    const projects = [{ id: 'a', name: 'App' }, { id: 'b', name: 'Billing', lastUpdateTime: '2026-06-01T00:00:00Z' }];
+    const remote = { organization: 'contoso', organizationUrl: 'https://dev.azure.com/contoso', project: 'App' };
+    assert.deepEqual(suggestProject(projects, 'https://contoso.visualstudio.com', { remotes: [remote] }), { value: projects[0], reason: 'gitRemote' });
 });

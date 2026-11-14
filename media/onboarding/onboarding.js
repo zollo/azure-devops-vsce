@@ -306,6 +306,13 @@
                         }, icon(isPrimary ? 'star-full' : 'star-empty'), h('span', {}, isPrimary ? 'Primary' : 'Make primary'))
                         : null);
             }));
+        if (state.teamsFailed) {
+            return h('div', { className: 'field' },
+                h('span', { className: 'label' }, icon('people'), ' Teams'),
+                h('div', { className: 'banner error', role: 'alert' }, icon('error'), h('span', {}, state.teamsNote || 'Could not load teams.')),
+                h('div', { className: 'field-links' },
+                    linkButton('Try again', () => send({ type: 'selectProject', projectId: state.projectId }), 'retry-teams')));
+        }
         return h('div', { className: 'field' },
             h('span', { className: 'label' }, icon('people'), ' Teams'),
             note(state.teamsNote),
@@ -320,7 +327,7 @@
     }
 
     function renderReview() {
-        const ready = !state.loading && state.organizationUrl && state.projectId;
+        const ready = !state.loading && !state.teamsFailed && state.organizationUrl && state.projectId;
         return [
             header('Check your settings', 'We filled these in for you. Change anything that isn’t right, or just continue.'),
             h('div', { className: 'account' },

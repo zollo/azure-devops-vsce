@@ -203,7 +203,10 @@ async function collectHints(): Promise<Hints> {
         remotes: await detectRemotes(),
         organizationUrl: config.get<string>('organizationUrl', '') || undefined,
         project: config.get<string>('defaultProject', '') || undefined,
-        teams: savedTeams.length ? savedTeams : defaultTeam ? [defaultTeam] : undefined
+        // Select Team changes only defaultTeam, so it stays the primary (first) team.
+        teams: defaultTeam
+            ? [defaultTeam, ...savedTeams.filter(t => t.toLowerCase() !== defaultTeam.toLowerCase())]
+            : savedTeams.length ? savedTeams : undefined
     };
 }
 

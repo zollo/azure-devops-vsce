@@ -268,3 +268,54 @@ test('dismiss is passed through', async () => {
     await h.controller.handle({ type: 'dismiss' });
     assert.equal(h.isDismissed(), true);
 });
+
+test('a sign-in that finishes after Back is ignored', async () => {
+    let finishSignIn: (s: MicrosoftSession) => void = () => {};
+    const deferred = harness({ orgsByAuth: { [bearer(homeSession)]: ['contoso'] }, orgs: { contoso } });
+    (deferred.controller as any).deps.signInMicrosoft = () => new Promise<MicrosoftSession>(resolve => { finishSignIn = resolve; });
+    const signIn = deferred.controller.handle({ type: 'chooseAuth', method: 'microsoft' });
+    assert.equal(deferred.state().step, 'signingIn');
+    await deferred.controller.handle({ type: 'back' });
+    finishSignIn(homeSession);
+    await signIn;
+    assert.equal(deferred.state().step, 'welcome');
+    assert.equal(deferred.requests.length, 0, 'no requests with the abandoned sign-in');
+});
+
+test('a failed team lookup blocks finishing until a retry succeeds', async () => {
+    let failTeams = true;
+    const h = harness({ sessions: { home: homeSession }, orgsByAuth: { [bearer(homeSession)]: ['contoso'] }, orgs: { contoso } });
+    const deps = (h.controller as any).deps as OnboardingDeps;
+    const realCreate = deps.createHttp;
+    deps.createHttp = auth => {
+        const get = realCreate(auth);
+        return async (url, params) => {
+            if (failTeams && url.endsWith('/teams')) {
+                throw Object.assign(new Error('boom'), { response: { status: 500 } });
+            }
+            return get(url, params);
+        };
+    };
+    await h.controller.handle({ type: 'chooseAuth', method: 'microsoft' });
+    assert.equal(h.state().teamsFailed, true);
+    await h.controller.handle({ type: 'finish' });
+    assert.equal(h.saved.length, 0);
+    failTeams = false;
+    await h.controller.handle({ type: 'selectProject', projectId: h.state().projectId! });
+    assert.equal(h.state().teamsFailed, false);
+    await h.controller.handle({ type: 'finish' });
+    assert.deepEqual(h.saved[0].teams, ['Web Team']);
+});
+
+test('saved teams only apply to the organization they were saved for', async () => {
+    const hints = { remotes: [], organizationUrl: 'https://dev.azure.com/other', project: 'App', teams: ['App Team'] };
+    const h = harness({ hints, sessions: { home: homeSession }, orgsByAuth: { [bearer(homeSession)]: ['contoso'] }, orgs: { contoso } });
+    await h.controller.handle({ type: 'chooseAuth', method: 'microsoft' });
+    await h.controller.handle({ type: 'selectProject', projectId: 'p-app' });
+    assert.deepEqual(h.state().selectedTeamIds, ['t-api', 't-mobile'], 'membership, not the other org\'s saved team');
+
+    const same = harness({ hints: { ...hints, organizationUrl: 'https://contoso.visualstudio.com' }, sessions: { home: homeSession }, orgsByAuth: { [bearer(homeSession)]: ['contoso'] }, orgs: { contoso } });
+    await same.controller.handle({ type: 'chooseAuth', method: 'microsoft' });
+    assert.equal(same.state().projectId, 'p-app');
+    assert.deepEqual(same.state().selectedTeamIds, ['t-app']);
+});

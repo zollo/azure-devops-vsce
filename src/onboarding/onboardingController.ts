@@ -16,6 +16,7 @@ import {
     normalizeTenantInput,
     Organization,
     organizationNameFromUrl,
+    sameOrganization,
     parseTenants,
     Project,
     suggestOrganization,
@@ -83,6 +84,8 @@ export interface OnboardingState {
     selectedTeamIds: string[];
     primaryTeamId?: string;
     teamsNote?: string;
+    /** The team lookup failed; the user must retry before finishing. */
+    teamsFailed?: boolean;
     /** PAT step: the token could not list organizations, so ask for the URL. */
     patNeedsOrganization: boolean;
     patOrganizationHint?: string;
@@ -138,6 +141,8 @@ export class OnboardingController {
     private pat: string | undefined;
     /** Increments on every org/project change so late responses for an old selection are dropped. */
     private generation = 0;
+    /** Increments on every sign-in attempt and on Back, so a sign-in that finishes late is ignored. */
+    private authAttempt = 0;
 
     constructor(private readonly deps: OnboardingDeps) {
         this.hints = deps.getHints().catch(error => {
@@ -180,6 +185,7 @@ export class OnboardingController {
 
     private back(): void {
         this.generation++;
+        this.authAttempt++;
         this.http = undefined;
         this.session = undefined;
         this.pat = undefined;
@@ -199,12 +205,19 @@ export class OnboardingController {
             return;
         }
 
+        const attempt = ++this.authAttempt;
         this.update({ step: 'signingIn', authMethod: 'microsoft', error: undefined });
         let session: MicrosoftSession | undefined;
         try {
             session = await this.deps.signInMicrosoft(undefined);
         } catch (error) {
+            if (attempt !== this.authAttempt) {
+                return;
+            }
             this.update({ step: 'welcome', error: `Sign-in failed: ${errorMessage(error)}` });
+            return;
+        }
+        if (attempt !== this.authAttempt) {
             return;
         }
         if (!session) {
@@ -239,6 +252,8 @@ export class OnboardingController {
             this.update({ error: 'Enter a personal access token.' });
             return;
         }
+        const attempt = ++this.authAttempt;
+        const stale = () => attempt !== this.authAttempt;
         this.pat = pat;
         this.http = this.deps.createHttp(`Basic ${Buffer.from(`:${pat}`).toString('base64')}`);
         this.update({ error: undefined, loading: 'organizations' });
@@ -250,7 +265,17 @@ export class OnboardingController {
                 this.update({ loading: undefined, error: 'That does not look like an organization URL.' });
                 return;
             }
-            await this.verifyOrganization(url);
+            try {
+                await this.verifyOrganization(url);
+            } catch (error) {
+                if (!stale()) {
+                    this.update({ loading: undefined, error: `Could not connect to that organization: ${errorMessage(error)}` });
+                }
+                return;
+            }
+            if (stale()) {
+                return;
+            }
             this.update({ step: 'review', account: 'Personal access token' });
             await this.applyOrganizations([{ id: url, name: organizationNameFromUrl(url), url }]);
             return;
@@ -258,12 +283,18 @@ export class OnboardingController {
 
         try {
             const orgs = await fetchOrganizations(this.http);
+            if (stale()) {
+                return;
+            }
             if (orgs.length) {
                 this.update({ step: 'review', account: 'Personal access token' });
                 await this.applyOrganizations(orgs);
                 return;
             }
         } catch (error) {
+            if (stale()) {
+                return;
+            }
             this.deps.log(`PAT could not list organizations: ${errorMessage(error)}`);
             const status = (error as any)?.response?.status;
             if (status === 401) {
@@ -277,12 +308,18 @@ export class OnboardingController {
         if (hint) {
             try {
                 await this.verifyOrganization(hint);
+                if (stale()) {
+                    return;
+                }
                 this.update({ step: 'review', account: 'Personal access token' });
                 await this.applyOrganizations([{ id: hint, name: organizationNameFromUrl(hint), url: hint }]);
                 return;
             } catch {
                 // Fall through and ask.
             }
+        }
+        if (stale()) {
+            return;
         }
         this.update({
             loading: undefined,
@@ -316,6 +353,10 @@ export class OnboardingController {
             }
             const response = await this.deps.createHttp(`Bearer ${token}`)('https://management.azure.com/tenants', { 'api-version': '2022-12-01' });
             const home = this.state.tenants.find(t => t.isHome);
+            // Ignore a late answer after the user went back or switched to a PAT.
+            if (this.state.authMethod !== 'microsoft' || this.state.step !== 'review') {
+                return;
+            }
             const tenants = parseTenants(response.data, this.homeTenantId, home?.domain);
             // Keep tenants the user typed in by hand.
             for (const existing of this.state.tenants) {
@@ -348,6 +389,7 @@ export class OnboardingController {
         if (this.state.authMethod !== 'microsoft' || tenantId === this.state.tenantId) {
             return;
         }
+        const attempt = ++this.authAttempt;
         const previous = this.state.tenantId;
         this.update({ tenantId, error: undefined, loading: 'organizations' });
         const isHome = tenantId === this.homeTenantId;
@@ -355,7 +397,13 @@ export class OnboardingController {
         try {
             session = await this.deps.signInMicrosoft(isHome ? undefined : tenantId);
         } catch (error) {
+            if (attempt !== this.authAttempt) {
+                return;
+            }
             this.update({ tenantId: previous, loading: undefined, error: `Could not sign in to that directory: ${errorMessage(error)}` });
+            return;
+        }
+        if (attempt !== this.authAttempt) {
             return;
         }
         if (!session) {
@@ -473,13 +521,13 @@ export class OnboardingController {
             return;
         }
         const generation = ++this.generation;
-        this.update({ projectId, projectNote: note, error: undefined, loading: 'teams', teams: [], selectedTeamIds: [], primaryTeamId: undefined, teamsNote: undefined });
+        this.update({ projectId, projectNote: note, error: undefined, loading: 'teams', teams: [], selectedTeamIds: [], primaryTeamId: undefined, teamsNote: undefined, teamsFailed: false });
         let result;
         try {
             result = await fetchTeams(this.http, orgUrl, projectId);
         } catch (error) {
             if (generation === this.generation) {
-                this.update({ loading: undefined, teamsNote: `Could not load teams: ${errorMessage(error)}` });
+                this.update({ loading: undefined, teamsFailed: true, teamsNote: `Could not load teams: ${errorMessage(error)}` });
             }
             return;
         }
@@ -487,7 +535,9 @@ export class OnboardingController {
             return;
         }
         const hints = await this.hints;
-        const sameProject = this.state.projects.find(p => p.id === projectId)?.name.toLowerCase() === hints.project?.toLowerCase();
+        // Saved teams only apply to the organization and project they were saved for.
+        const sameProject = !!hints.organizationUrl && sameOrganization(hints.organizationUrl, orgUrl)
+            && this.state.projects.find(p => p.id === projectId)?.name.toLowerCase() === hints.project?.toLowerCase();
         const suggestion = suggestTeams(result.teams, { teams: sameProject ? hints.teams : undefined });
         const selected = suggestion.value ?? [];
         let teamsNote = describeReason(suggestion.reason, 'teams');
@@ -530,6 +580,10 @@ export class OnboardingController {
         const project = projects.find(p => p.id === projectId);
         if (!authMethod || !organizationUrl || !project) {
             this.update({ error: 'Pick an organization and a project first.' });
+            return;
+        }
+        if (this.state.teamsFailed || this.state.loading) {
+            this.update({ error: 'Teams are still loading or could not be loaded. Retry before continuing.' });
             return;
         }
         const teams = this.orderedTeamNames();
