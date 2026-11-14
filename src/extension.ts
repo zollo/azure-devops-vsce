@@ -15,6 +15,7 @@ import { SearchService } from './services/searchService';
 import { ActiveWorkItemService } from './services/activeWorkItemService';
 import { detectOriginalExtensionConflict } from './utils/conflictDetection';
 import { startConnectionMonitor } from './authentication/connectionMonitorSetup';
+import { OnboardingPanel } from './onboarding/onboardingPanel';
 
 export let authenticationManager: AuthenticationManager;
 export let workItemProvider: WorkItemProvider;
@@ -205,6 +206,11 @@ export async function activate(context: vscode.ExtensionContext) {
         queryProvider.refresh();
         connectionStatusProvider.refresh();
     });
+
+    // First run: open the onboarding wizard when nothing is configured yet.
+    if (!authenticationManager.isConnected() && OnboardingPanel.shouldShowOnStartup(context)) {
+        vscode.commands.executeCommand('azureDevOps.getStarted');
+    }
 
     console.log('Azure DevOps Boards extension initialized successfully');
 }

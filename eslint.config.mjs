@@ -24,6 +24,12 @@ export default tseslint.config(
         }
     },
     {
+        // Scripts that run inside webviews.
+        files: ['media/**/*.js'],
+        languageOptions: { globals: { ...globals.browser, acquireVsCodeApi: 'readonly' } },
+        rules: { '@typescript-eslint/no-require-imports': 'off' }
+    },
+    {
         files: ['*.js', '*.mjs'],
         languageOptions: { globals: { ...globals.node } },
         rules: { '@typescript-eslint/no-require-imports': 'off' }

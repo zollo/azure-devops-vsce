@@ -17,7 +17,8 @@ const watch = process.argv.includes('--watch');
 const vendorFiles = [
     ['node_modules/quill/dist/quill.min.js', 'dist/vendor/quill/quill.min.js'],
     ['node_modules/quill/dist/quill.snow.css', 'dist/vendor/quill/quill.snow.css'],
-    ['node_modules/@vscode/codicons/dist/codicon.ttf', 'dist/vendor/codicons/codicon.ttf']
+    ['node_modules/@vscode/codicons/dist/codicon.ttf', 'dist/vendor/codicons/codicon.ttf'],
+    ['node_modules/@vscode/codicons/dist/codicon.css', 'dist/vendor/codicons/codicon.css']
 ];
 
 function copyVendorFiles() {
