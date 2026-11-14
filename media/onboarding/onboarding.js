@@ -229,7 +229,7 @@
             select('tenant', options, state.tenantId, v => send({ type: 'selectTenant', tenantId: v }), !!state.loading),
             h('div', { className: 'field-links' },
                 state.loading === 'tenants' ? spinner('Looking for your other directories…') : null,
-                state.canFindTenants && state.loading !== 'tenants' ? linkButton('Find my other directories', () => send({ type: 'findTenants' }), 'find-tenants') : null,
+                state.canFindTenants && !state.loading ? linkButton('Find my other directories', () => send({ type: 'findTenants' }), 'find-tenants') : null,
                 linkButton(ui.showTenantInput ? 'Hide' : 'Enter a tenant ID or domain', () => { ui.showTenantInput = !ui.showTenantInput; render(); })),
             ui.showTenantInput ? inlineInput('tenant-input', 'contoso.onmicrosoft.com or tenant ID', 'Use', v => send({ type: 'addTenant', value: v })) : null);
     }

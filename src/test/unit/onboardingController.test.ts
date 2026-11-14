@@ -241,6 +241,8 @@ test('a rejected PAT shows an error and stays on the PAT step', async () => {
     await h.controller.handle({ type: 'submitPat', pat: 'expired' });
     assert.equal(h.state().step, 'pat');
     assert.match(h.state().error ?? '', /rejected/);
+    // The token may still be an Azure DevOps Server token, so offer the URL field.
+    assert.equal(h.state().patNeedsOrganization, true);
     await h.controller.handle({ type: 'submitPat', pat: '   ' });
     assert.match(h.state().error ?? '', /Enter a personal access token/);
 });
@@ -318,4 +320,19 @@ test('saved teams only apply to the organization they were saved for', async () 
     await same.controller.handle({ type: 'chooseAuth', method: 'microsoft' });
     assert.equal(same.state().projectId, 'p-app');
     assert.deepEqual(same.state().selectedTeamIds, ['t-app']);
+});
+
+test('directory discovery uses the wizard\'s account and never interrupts another lookup', async () => {
+    const accounts: unknown[] = [];
+    const h = harness({ sessions: { home: { ...homeSession, account: { id: 'acct-a', label: 'a' } } }, orgsByAuth: { [bearer(homeSession)]: ['contoso'] }, orgs: { contoso } });
+    const deps = (h.controller as any).deps as OnboardingDeps;
+    deps.getArmToken = async (_interactive, account) => { accounts.push(account); return undefined; };
+    await h.controller.handle({ type: 'chooseAuth', method: 'microsoft' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(accounts, [{ id: 'acct-a', label: 'a' }]);
+
+    (h.controller as any).state = { ...h.state(), loading: 'teams' };
+    await h.controller.handle({ type: 'findTenants' });
+    assert.equal(accounts.length, 1, 'no lookup while teams are loading');
+    assert.equal(h.state().loading, 'teams');
 });

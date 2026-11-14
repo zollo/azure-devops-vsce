@@ -33,6 +33,8 @@ export interface MicrosoftSession {
     id: string;
     accessToken: string;
     accountLabel: string;
+    /** The VS Code account, passed back so other tokens are requested for the same account. */
+    account?: unknown;
 }
 
 export interface OnboardingResult {
@@ -53,7 +55,7 @@ export interface OnboardingDeps {
     /** Microsoft (Entra ID) sign-in for Azure DevOps; `tenant` undefined means the home tenant. */
     signInMicrosoft(tenant: string | undefined): Promise<MicrosoftSession | undefined>;
     /** Token for Azure Resource Manager, used only to list tenants. Interactive may prompt for consent. */
-    getArmToken(interactive: boolean): Promise<string | undefined>;
+    getArmToken(interactive: boolean, account: unknown): Promise<string | undefined>;
     /** An HTTP getter that sends this Authorization header. */
     createHttp(authorization: string): HttpGet;
     /** Values detected from the workspace and settings. */
@@ -297,8 +299,14 @@ export class OnboardingController {
             }
             this.deps.log(`PAT could not list organizations: ${errorMessage(error)}`);
             const status = (error as any)?.response?.status;
-            if (status === 401) {
-                this.update({ loading: undefined, error: 'Azure DevOps rejected this token. Check that it is valid and has not expired.' });
+            if (status === 401 && !this.state.patOrganizationHint) {
+                // Azure DevOps Server tokens are rejected by the cloud profile service, so the
+                // token may still be valid for a collection URL.
+                this.update({
+                    loading: undefined,
+                    patNeedsOrganization: true,
+                    error: 'Azure DevOps Services rejected this token. Check that it is valid, or enter your organization or Azure DevOps Server collection URL.'
+                });
                 return;
             }
         }
@@ -340,11 +348,15 @@ export class OnboardingController {
     // -----------------------------------------------------------------------------------------
 
     private async loadTenants(interactive: boolean): Promise<void> {
+        if (interactive && this.state.loading) {
+            // Don't replace another lookup's loading state; the link is disabled meanwhile.
+            return;
+        }
         if (interactive) {
             this.update({ loading: 'tenants', error: undefined });
         }
         try {
-            const token = await this.deps.getArmToken(interactive);
+            const token = await this.deps.getArmToken(interactive, this.session?.account);
             if (!token) {
                 if (interactive) {
                     this.update({ loading: undefined, error: 'Could not list your directories. You can enter a tenant ID or domain instead.' });

@@ -58,7 +58,7 @@ export class OnboardingPanel {
     ) {
         this.controller = new OnboardingController({
             signInMicrosoft: tenant => this.signInMicrosoft(tenant),
-            getArmToken: interactive => this.getArmToken(interactive),
+            getArmToken: (interactive, account) => this.getArmToken(interactive, account as vscode.AuthenticationSessionAccountInformation | undefined),
             createHttp: authorization => createHttp(authorization),
             getHints: () => collectHints(),
             save: result => this.save(result),
@@ -85,12 +85,14 @@ export class OnboardingPanel {
             // Let the user pick the account on first sign-in instead of reusing a remembered one.
             clearSessionPreference: !tenant
         });
-        return session ? { id: session.id, accessToken: session.accessToken, accountLabel: session.account.label } : undefined;
+        return session ? { id: session.id, accessToken: session.accessToken, accountLabel: session.account.label, account: session.account } : undefined;
     }
 
-    private async getArmToken(interactive: boolean): Promise<string | undefined> {
+    private async getArmToken(interactive: boolean, account: vscode.AuthenticationSessionAccountInformation | undefined): Promise<string | undefined> {
         try {
-            const session = await vscode.authentication.getSession('microsoft', [ARM_SCOPE], interactive ? { createIfNone: true } : { silent: true });
+            // Ask for the account signed in to the wizard, not whichever ARM session is cached.
+            const session = await vscode.authentication.getSession('microsoft', [ARM_SCOPE],
+                interactive ? { createIfNone: true, account } : { silent: true, account });
             return session?.accessToken;
         } catch {
             return undefined;
