@@ -1,5 +1,7 @@
 name: Release
 
+# Normally started by release-please.yml when its release PR is merged (see that file).
+#
 # Push a tag like v0.3.0 (matching package.json "version") to build the VSIX once,
 # attach it to a GitHub Release and publish the same file to the VS Code Marketplace.
 #
@@ -85,10 +87,13 @@ jobs:
           if [ "$PUBLISHER" = "publisher-tbd" ]; then
             echo "::error::Set the real Marketplace publisher ID in package.json before releasing"; exit 1
           fi
-          # Require a dated entry such as "## [0.3.0] - 2026-12-01" (dots escaped for the regex).
+          # Require a dated entry (dots escaped for the regex), either hand-written as
+          # "## [0.3.0] - 2026-12-01" or as release-please writes it:
+          # "## [0.3.1](https://github.com/.../compare/v0.3.0...v0.3.1) (2026-12-01)".
           VERSION_RE=$(printf '%s' "$VERSION" | sed 's/[.]/\\./g')
-          if ! grep -qE "^## \[$VERSION_RE\] - [0-9]{4}-[0-9]{2}-[0-9]{2}\s*$" CHANGELOG.md; then
-            echo "::error::CHANGELOG.md needs a dated '## [$VERSION] - YYYY-MM-DD' entry"; exit 1
+          DATE_RE='[0-9]{4}-[0-9]{2}-[0-9]{2}'
+          if ! grep -qE "^## \[$VERSION_RE\]( - $DATE_RE|\([^)]*\) \($DATE_RE\))\s*$" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md needs a dated entry for $VERSION ('## [$VERSION] - YYYY-MM-DD')"; exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "vsix=ado-boards-$VERSION.vsix" >> "$GITHUB_OUTPUT"

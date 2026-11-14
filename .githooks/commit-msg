@@ -1,0 +1,4 @@
+#!/bin/sh
+# Checks the commit message against Conventional Commits (commitlint.config.mjs).
+# Enable with: npm run hooks:install
+exec npx --no -- commitlint --edit "$1"

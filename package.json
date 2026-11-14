@@ -681,9 +681,12 @@
     "test": "npm run test:unit",
     "test:unit": "npm run compile && node --test out/test/unit/*.test.js",
     "test:integration": "npm run compile && npm run build && vscode-test",
-    "test:coverage": "npm run compile && npm run build && vscode-test --coverage"
+    "test:coverage": "npm run compile && npm run build && vscode-test --coverage",
+    "hooks:install": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
     "@eslint/js": "^9.39.5",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.20.5",
