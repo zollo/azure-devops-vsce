@@ -117,7 +117,12 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                 });
 
                 if (selectedProject) {
-                    await vscode.workspace.getConfiguration('azureDevOps').update('defaultProject', selectedProject.label, true);
+                    const settings = vscode.workspace.getConfiguration('azureDevOps');
+                    if (selectedProject.label !== components.authenticationManager.getConfig()?.defaultProject) {
+                        // Saved teams belong to the previous project.
+                        await settings.update('teams', [], true);
+                    }
+                    await settings.update('defaultProject', selectedProject.label, true);
 
                     // Now select team
                     await vscode.commands.executeCommand('azureDevOps.selectTeam');

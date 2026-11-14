@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { AuthenticationManager } from './authenticationManager';
 import { organizationLabel } from '../onboarding/discovery';
+import { ConnectionHealth } from './connectionMonitor';
 
 class ConnectionStatusItem extends vscode.TreeItem {
     constructor(
@@ -24,6 +25,16 @@ export class ConnectionStatusProvider implements vscode.TreeDataProvider<Connect
         this.authManager.onDidChangeSession(() => {
             this.refresh();
         });
+    }
+
+    private health: ConnectionHealth = 'unknown';
+
+    /** Called by the connection monitor so the view warns about outages and expired sign-ins. */
+    setHealth(health: ConnectionHealth): void {
+        if (health !== this.health) {
+            this.health = health;
+            this.refresh();
+        }
     }
 
     refresh(): void {
@@ -76,8 +87,12 @@ export class ConnectionStatusProvider implements vscode.TreeDataProvider<Connect
             items.push(new ConnectionStatusItem(config.defaultProject, '', change, new vscode.ThemeIcon('project')));
         }
 
-        const teams = settings.get<string[]>('teams', []).filter(t => typeof t === 'string' && t);
+        let teams = settings.get<string[]>('teams', []).filter(t => typeof t === 'string' && t);
         const primary = config.defaultTeam || teams[0];
+        if (primary && !teams.some(t => t.toLowerCase() === primary.toLowerCase())) {
+            // Select Team changed the team without updating the saved list, so the list is stale.
+            teams = [primary];
+        }
         if (primary) {
             const others = teams.filter(t => t.toLowerCase() !== primary.toLowerCase()).length;
             const team = new ConnectionStatusItem(primary, others ? `+${others} more` : '', change, new vscode.ThemeIcon('people'));
@@ -85,9 +100,13 @@ export class ConnectionStatusProvider implements vscode.TreeDataProvider<Connect
             items.push(team);
         }
 
-        if (!this.authManager.isConnected()) {
+        const problem = this.health === 'authExpired' ? 'Sign-in expired'
+            : this.health === 'offline' ? 'Cannot reach Azure DevOps'
+            : !this.authManager.isConnected() ? 'Not connected'
+            : undefined;
+        if (problem) {
             items.push(new ConnectionStatusItem(
-                'Not connected',
+                problem,
                 'Check connection',
                 { command: 'azureDevOps.checkConnection', title: 'Check Connection' },
                 new vscode.ThemeIcon('warning', new vscode.ThemeColor('notificationsWarningIcon.foreground'))

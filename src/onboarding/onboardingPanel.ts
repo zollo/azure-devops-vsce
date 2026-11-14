@@ -31,6 +31,7 @@ export class OnboardingPanel {
         // Both views include the release highlights, so this release counts as shown.
         void context.globalState.update(LAST_SHOWN_RELEASE_KEY, releaseId(RELEASE_NOTES));
         if (OnboardingPanel.current) {
+            OnboardingPanel.current.controller.showMode(mode);
             OnboardingPanel.current.panel.reveal(vscode.ViewColumn.One);
             return;
         }

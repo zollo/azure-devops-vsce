@@ -194,7 +194,7 @@ export async function activate(context: vscode.ExtensionContext) {
         sprintProvider.refresh();
         queryProvider.refresh();
         connectionStatusProvider.refresh();
-    });
+    }, health => connectionStatusProvider.setHealth(health));
 
     // New installs and empty configurations get the Get Started wizard (with What's new);
     // configured users get only What's new, once per release.

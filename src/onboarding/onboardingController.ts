@@ -195,6 +195,18 @@ export class OnboardingController {
         }
     }
 
+    /**
+     * Switches an open tab to the requested view: setup leaves What's new, and What's new
+     * replaces only the untouched welcome step so an in-progress setup is kept.
+     */
+    public showMode(mode: 'onboarding' | 'whatsNew'): void {
+        if (mode === 'onboarding' && this.state.step === 'whatsNew') {
+            this.back();
+        } else if (mode === 'whatsNew' && this.state.step === 'welcome' && !this.state.loading) {
+            this.update({ step: 'whatsNew', error: undefined });
+        }
+    }
+
     private back(): void {
         this.generation++;
         this.authAttempt++;

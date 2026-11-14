@@ -632,6 +632,7 @@ export class AuthenticationManager {
         await vscode.workspace.getConfiguration('azureDevOps').update('organizationUrl', '', true);
         await vscode.workspace.getConfiguration('azureDevOps').update('defaultProject', '', true);
         await vscode.workspace.getConfiguration('azureDevOps').update('defaultTeam', '', true);
+        await vscode.workspace.getConfiguration('azureDevOps').update('teams', [], true);
 
         vscode.commands.executeCommand('setContext', 'azureDevOps.signedIn', false);
         vscode.commands.executeCommand('setContext', 'azureDevOps.connected', false);

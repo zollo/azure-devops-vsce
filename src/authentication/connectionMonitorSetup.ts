@@ -19,9 +19,11 @@ export function startConnectionMonitor(
     context: vscode.ExtensionContext,
     authManager: AuthenticationManager,
     statusBar: StatusBarManager,
-    refreshViews: () => void
+    refreshViews: () => void,
+    onHealth?: (health: ConnectionHealth) => void
 ): ConnectionMonitor {
     const onHealthChange = (health: ConnectionHealth) => {
+        onHealth?.(health);
         switch (health) {
             case 'connected':
                 statusBar.updateStatus('connected');
