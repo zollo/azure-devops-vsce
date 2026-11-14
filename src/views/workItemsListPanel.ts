@@ -1416,24 +1416,49 @@ export class WorkItemsListPanel {
                 }
             }
 
-            // Fit each row's tags on one line, folding the rest into a "+N" chip
-            function fitTags(container) {
-                const chips = Array.from(container.querySelectorAll('.tag:not(.tag-more)'));
-                const more = container.querySelector('.tag-more');
-                if (!more || chips.length === 0) return;
-                chips.forEach(c => { c.hidden = false; });
-                more.hidden = true;
-                const available = container.clientWidth;
-                if (available === 0) return;
-                container.classList.add('measuring');
-                let hiddenCount = 0;
-                for (let i = chips.length - 1; i >= 1 && container.scrollWidth > available; i--) {
-                    chips[i].hidden = true;
-                    hiddenCount++;
-                    more.textContent = '+' + hiddenCount;
-                    more.hidden = false;
+            // Fit each row's tags on one line, folding the rest into a "+N" chip.
+            // Works in three passes over all rows (reset, measure, apply) so the browser lays
+            // the table out once, not once per chip.
+            const TAG_GAP = 4;
+
+            function chipsThatFit(widths, available, moreWidth) {
+                const total = widths.reduce((sum, w) => sum + w, 0) + TAG_GAP * Math.max(0, widths.length - 1);
+                if (total <= available) return widths.length;
+                let used = moreWidth;
+                let count = 0;
+                for (const w of widths) {
+                    if (used + w + TAG_GAP > available) break;
+                    used += w + TAG_GAP;
+                    count++;
                 }
-                container.classList.remove('measuring');
+                return Math.max(1, count);
+            }
+
+            function fitAllTags(containers) {
+                const jobs = [];
+                containers.forEach(container => {
+                    const chips = Array.from(container.querySelectorAll('.tag:not(.tag-more)'));
+                    const more = container.querySelector('.tag-more');
+                    if (!more || chips.length === 0) return;
+                    chips.forEach(c => { c.hidden = false; });
+                    more.textContent = '+' + chips.length;
+                    more.hidden = false;
+                    container.classList.add('measuring');
+                    jobs.push({ container, chips, more });
+                });
+                jobs.forEach(job => {
+                    job.available = job.container.clientWidth;
+                    job.widths = job.chips.map(c => c.offsetWidth);
+                    job.moreWidth = job.more.offsetWidth;
+                });
+                jobs.forEach(job => {
+                    job.container.classList.remove('measuring');
+                    const keep = job.available === 0 ? job.chips.length : chipsThatFit(job.widths, job.available, job.moreWidth);
+                    job.chips.forEach((c, i) => { c.hidden = i >= keep; });
+                    const hiddenCount = job.chips.length - keep;
+                    job.more.textContent = '+' + hiddenCount;
+                    job.more.hidden = hiddenCount === 0;
+                });
             }
 
             let fitPending = false;
@@ -1444,11 +1469,13 @@ export class WorkItemsListPanel {
                     fitPending = false;
                     const table = document.getElementById('workItemsTable');
                     if (!table || table.classList.contains('hide-col-tags')) return;
+                    const containers = [];
                     table.querySelectorAll('tbody tr').forEach(row => {
                         if (row.style.display === 'none') return;
                         const tags = row.querySelector('.tags');
-                        if (tags) fitTags(tags);
+                        if (tags) containers.push(tags);
                     });
+                    fitAllTags(containers);
                 });
             }
 

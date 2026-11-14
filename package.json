@@ -672,6 +672,7 @@
         },
         "azureDevOps.workItemsView.columns": {
           "type": "array",
+          "scope": "application",
           "uniqueItems": true,
           "items": {
             "type": "string",
