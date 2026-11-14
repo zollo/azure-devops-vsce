@@ -93,9 +93,10 @@
             if (Array.isArray(child)) {
                 child.forEach(add);
             } else if (child instanceof Node) {
-                el.appendChild(child);
+                el.append(child);
             } else {
-                el.appendChild(document.createTextNode(String(child)));
+                // append() inserts strings as text, never as markup.
+                el.append(String(child));
             }
         };
         children.forEach(add);
