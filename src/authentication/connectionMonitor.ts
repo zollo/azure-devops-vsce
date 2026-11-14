@@ -74,6 +74,8 @@ export class ConnectionMonitor {
     private promptOpen = false;
     /** Set once we have prompted for the current expiry; cleared when the connection works again. */
     private promptedForThisExpiry = false;
+    /** Bumped by reset(), so checks and prompts from before a sign-out cannot change state. */
+    private generation = 0;
 
     private readonly schedule: (callback: () => void, delayMs: number) => Timer;
     private readonly now: () => number;
@@ -119,6 +121,8 @@ export class ConnectionMonitor {
 
     /** Forgets the current state, for example after the user signs out or signs in again. */
     public reset(): void {
+        this.generation++;
+        this.inFlight = undefined;
         this.offlineAttempts = 0;
         this.promptedForThisExpiry = false;
         this.lastCheckAt = Number.NEGATIVE_INFINITY;
@@ -136,10 +140,16 @@ export class ConnectionMonitor {
         if (this.now() - this.lastCheckAt < maxAgeMs) {
             return Promise.resolve(this.health);
         }
-        this.inFlight = this.runCheck().finally(() => {
-            this.inFlight = undefined;
+        const check = this.runCheck().finally(() => {
+            if (this.inFlight === check) {
+                this.inFlight = undefined;
+            }
+            // Any check, not only a timer tick, restarts the timer, so an outage found by a
+            // focus or manual check gets the short offline retry.
+            this.scheduleNext();
         });
-        return this.inFlight;
+        this.inFlight = check;
+        return check;
     }
 
     /** A regular request got a 401 that a silent refresh could not fix. */
@@ -187,14 +197,19 @@ export class ConnectionMonitor {
     }
 
     private async runCheck(): Promise<ConnectionHealth> {
+        const generation = this.generation;
         this.lastCheckAt = this.now();
 
         let result = await this.safeProbe();
-        if (result === 'unauthorized') {
+        if (result === 'unauthorized' && generation === this.generation) {
             const refreshed = await this.safeRefresh();
-            if (refreshed) {
+            if (refreshed && generation === this.generation) {
                 result = await this.safeProbe();
             }
+        }
+        if (generation !== this.generation) {
+            // Signed out (or reset) while this check was running: drop its result.
+            return this.health;
         }
 
         switch (result) {
@@ -220,13 +235,14 @@ export class ConnectionMonitor {
         if (this.promptOpen || this.promptedForThisExpiry) {
             return;
         }
+        const generation = this.generation;
         this.promptOpen = true;
         this.promptedForThisExpiry = true;
         this.deps.promptReauthentication()
             .catch(() => false)
             .then(async (reauthenticated) => {
                 this.promptOpen = false;
-                if (reauthenticated) {
+                if (reauthenticated && generation === this.generation) {
                     await this.check(0);
                 }
             });

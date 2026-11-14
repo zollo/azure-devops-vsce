@@ -121,3 +121,34 @@ test('a PAT is not refreshable unless it was replaced in secret storage', async 
     assert.equal(manager.getConfig()?.personalAccessToken, 'pat-2');
     assert.equal(manager.getAuthorizationHeader(), `Basic ${Buffer.from(':pat-2').toString('base64')}`);
 });
+
+test('a 401 for a token another request already replaced is retried without another refresh', async () => {
+    const manager = await oauthManager('old-token');
+    const seen: string[] = [];
+    const instance = manager.getAxiosInstance()!;
+    mock.authSession = session('new-token');
+
+    // The first request refreshes the token; the second was sent with the old one before that.
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const accept = adapterAccepting('new-token', seen);
+    instance.defaults.adapter = async (config) => {
+        if (config.url === '/slow' && !seen.includes('slow-sent')) {
+            seen.push('slow-sent');
+            await gate;
+            const response = { data: {}, status: 401, statusText: 'Unauthorized', headers: {}, config };
+            throw Object.assign(new Error('401'), { config, response, isAxiosError: true });
+        }
+        return accept(config);
+    };
+
+    const slow = instance.get('/slow');
+    await instance.get('/fast');
+    const before = mock.getSessionCalls.length;
+    release();
+    const response = await slow;
+
+    assert.equal(response.status, 200);
+    assert.equal(mock.getSessionCalls.length, before, 'no second refresh');
+    assert.equal(seen.at(-1), 'Bearer new-token');
+});

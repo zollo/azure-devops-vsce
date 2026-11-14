@@ -216,7 +216,13 @@ export class AuthenticationManager {
                     // An expired OAuth token can usually be replaced silently; retry once with the new one.
                     if (requestConfig && !requestConfig._adoAuthRetried) {
                         requestConfig._adoAuthRetried = true;
-                        const refreshed = await this.refreshSessionSilently();
+                        // Another request may already have refreshed the token after this one was sent.
+                        const sentHeader = typeof requestConfig.headers?.get === 'function'
+                            ? requestConfig.headers.get('Authorization')
+                            : requestConfig.headers?.Authorization;
+                        const currentToken = this.getActiveAccessToken();
+                        const alreadyReplaced = !!currentToken && sentHeader !== this.getAuthorizationHeader(currentToken);
+                        const refreshed = alreadyReplaced || await this.refreshSessionSilently();
                         if (refreshed) {
                             if (requestConfig.headers && typeof requestConfig.headers.delete === 'function') {
                                 requestConfig.headers.delete('Authorization');

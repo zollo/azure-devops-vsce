@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { AuthenticationManager } from './authenticationManager';
-import { ConnectionHealth, ConnectionMonitor } from './connectionMonitor';
+import { ConnectionHealth, ConnectionMonitor, ProbeResult } from './connectionMonitor';
 import { StatusBarManager } from '../utils/statusBarManager';
 
 /** Re-check on window focus only if the last check is older than this. */
@@ -21,18 +21,10 @@ export function startConnectionMonitor(
     statusBar: StatusBarManager,
     refreshViews: () => void
 ): ConnectionMonitor {
-    const onHealthChange = async (health: ConnectionHealth, previous: ConnectionHealth) => {
+    const onHealthChange = (health: ConnectionHealth) => {
         switch (health) {
             case 'connected':
-                if (previous === 'offline' || previous === 'authExpired' || !authManager.isConnected()) {
-                    // Back after an outage or a sign-in: restore connection details and reload data.
-                    await authManager.autoConnect();
-                    vscode.commands.executeCommand('setContext', 'azureDevOps.connected', true);
-                    statusBar.updateStatus('connected');
-                    refreshViews();
-                } else {
-                    statusBar.updateStatus('connected');
-                }
+                statusBar.updateStatus('connected');
                 break;
             case 'offline':
                 statusBar.updateStatus('offline');
@@ -43,16 +35,32 @@ export function startConnectionMonitor(
         }
     };
 
+    /**
+     * Probes, and if the probe works but the extension is marked disconnected (after an
+     * outage, a rejected request or a new sign-in), restores the connection and reloads the
+     * views. A failed restore counts as unreachable, so the monitor keeps retrying.
+     */
+    const probeAndRecover = async (): Promise<ProbeResult> => {
+        const result = await authManager.probeConnection();
+        if (result !== 'ok' || authManager.isConnected()) {
+            return result;
+        }
+        if (!await authManager.autoConnect()) {
+            return 'unreachable';
+        }
+        vscode.commands.executeCommand('setContext', 'azureDevOps.connected', true);
+        refreshViews();
+        return 'ok';
+    };
+
     const monitor = new ConnectionMonitor(
         {
-            probe: () => authManager.probeConnection(),
+            probe: probeAndRecover,
             refreshSilently: () => authManager.refreshSessionSilently(),
             promptReauthentication: () => authManager.promptReauthentication(),
             // Skip background checks when not configured or while VS Code is in the background.
             shouldCheck: () => !!authManager.getConfig()?.organizationUrl && vscode.window.state.focused,
-            onHealthChange: (health, previous) => {
-                onHealthChange(health, previous).catch(err => console.warn('[ConnectionMonitor]', err));
-            }
+            onHealthChange
         },
         { intervalMs: readIntervalMs() }
     );
@@ -68,7 +76,8 @@ export function startConnectionMonitor(
             }
         }),
         vscode.window.onDidChangeWindowState((state) => {
-            if (state.focused && authManager.getConfig()?.organizationUrl) {
+            // Background checks off (interval 0) means no automatic probes on focus either.
+            if (state.focused && readIntervalMs() > 0 && authManager.getConfig()?.organizationUrl) {
                 void monitor.check(FOCUS_RECHECK_AGE_MS);
             }
         }),

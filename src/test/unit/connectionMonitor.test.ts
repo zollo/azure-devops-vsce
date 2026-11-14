@@ -216,7 +216,7 @@ test('start() checks immediately and schedules the next check', async () => {
     h.monitor.start();
     await flush();
     assert.equal(h.probeCalls, 1);
-    assert.deepEqual(h.scheduled, [90_000]);
+    assert.equal(h.scheduled.at(-1), 90_000);
     h.monitor.stop();
 });
 
@@ -249,4 +249,44 @@ test('reset() forgets the state so a new expiry prompts again', async () => {
     await h.monitor.check(0);
     await flush();
     assert.equal(h.promptCalls, 2);
+});
+
+test('a manual check that finds an outage reschedules to the short offline retry', async () => {
+    const h = createHarness(120_000);
+    h.monitor.start();
+    await flush();
+    assert.equal(h.scheduled.at(-1), 120_000);
+    h.probes.push('unreachable');
+    await h.monitor.check(0);
+    assert.equal(h.scheduled.at(-1), 15_000);
+    h.monitor.stop();
+});
+
+test('a check still running when the user signs out cannot change state or prompt', async () => {
+    let resolveProbe: (result: ProbeResult) => void = () => {};
+    const h = createHarness(120_000, {
+        probe: () => new Promise<ProbeResult>(resolve => { resolveProbe = resolve; })
+    });
+    const stale = h.monitor.check(0);
+    h.monitor.reset();
+    resolveProbe('unauthorized');
+    await stale;
+    await flush();
+    assert.equal(h.monitor.getHealth(), 'unknown');
+    assert.equal(h.refreshCalls, 0);
+    assert.equal(h.promptCalls, 0);
+});
+
+test('after reset() a new check does not reuse the stale in-flight one', async () => {
+    let calls = 0;
+    const h = createHarness(120_000, {
+        probe: () => {
+            calls++;
+            return calls === 1 ? new Promise<ProbeResult>(() => {}) : Promise.resolve('ok');
+        }
+    });
+    void h.monitor.check(0);
+    h.monitor.reset();
+    assert.equal(await h.monitor.check(0), 'connected');
+    assert.equal(calls, 2);
 });
