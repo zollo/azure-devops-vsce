@@ -31,8 +31,8 @@ _BULLET = re.compile(r"^\*\s+(?P<text>.*)$")
 
 
 def _entry_key(text: str) -> str:
-    text = _COMMIT_LINKS.sub("", text)
-    return " ".join(text.split()).casefold()
+    # Only the commit links differ between duplicates; compare the rest exactly.
+    return _COMMIT_LINKS.sub("", text).rstrip()
 
 
 def dedupe(content: str) -> tuple[str, int]:

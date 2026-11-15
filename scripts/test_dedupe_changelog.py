@@ -61,6 +61,10 @@ class DedupeTest(unittest.TestCase):
         content = "### Fixed\n" + entry("**a:** x", "1111111") + "\n" + entry("**b:** x", "2222222") + "\n"
         self.assertEqual(dedupe(content)[1], 0)
 
+    def test_entries_differing_only_by_case_are_kept(self):
+        content = "### Fixed\n" + entry("handle System.State", "1111111") + "\n" + entry("handle system.state", "2222222") + "\n"
+        self.assertEqual(dedupe(content)[1], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
