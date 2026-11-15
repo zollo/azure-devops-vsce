@@ -15,6 +15,7 @@ import { ActiveWorkItemService } from './services/activeWorkItemService';
 import { detectOriginalExtensionConflict } from './utils/conflictDetection';
 import { startConnectionMonitor } from './authentication/connectionMonitorSetup';
 import { OnboardingPanel } from './onboarding/onboardingPanel';
+import { affectsConnectionSettings } from './utils/configChanges';
 
 export let authenticationManager: AuthenticationManager;
 export let workItemProvider: WorkItemProvider;
@@ -120,9 +121,13 @@ export async function activate(context: vscode.ExtensionContext) {
     });
 
     // Register configuration change listener
+    const contributedSettingKeys = Object.keys(
+        context.extension?.packageJSON?.contributes?.configuration?.properties ?? {}
+    );
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration(async (e) => {
-            if (e.affectsConfiguration('azureDevOps')) {
+            // View-only settings (such as the Work Items columns) are handled by their views
+            if (affectsConnectionSettings(e, contributedSettingKeys)) {
                 await authenticationManager.refreshConfiguration();
                 workItemProvider.refresh();
                 backlogProvider.refresh();

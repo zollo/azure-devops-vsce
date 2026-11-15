@@ -2,6 +2,23 @@ import * as vscode from 'vscode';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem } from '../models/workItem';
 import { CacheManager } from '../utils/cacheManager';
+import { vendorAssetUri } from '../utils/webviewAssets';
+import { serializeForScript } from '../utils/webviewSecurity';
+import {
+    CHECKBOX_COLUMN_WIDTH,
+    DEFAULT_WORK_ITEM_COLUMNS,
+    WORK_ITEM_COLUMNS,
+    WorkItemColumnId,
+    columnVisibilityCss,
+    gridTemplateFor,
+    minTableWidthFor,
+    renderHeaderRow,
+    renderWorkItemRow,
+    resolveVisibleColumns
+} from './workItemsColumns';
+
+/** Setting (under azureDevOps.) that holds the columns shown in the Work Items view. */
+const COLUMNS_SETTING = 'workItemsView.columns';
 
 export class WorkItemsListPanel {
     public static currentPanel: WorkItemsListPanel | undefined;
@@ -13,6 +30,7 @@ export class WorkItemsListPanel {
     private authenticationManager: AuthenticationManager;
     private workItems: WorkItem[] = [];
     private selectedIds: Set<number> = new Set();
+    private _columns: WorkItemColumnId[];
 
     public static createOrShow(
         extensionUri: vscode.Uri,
@@ -50,6 +68,19 @@ export class WorkItemsListPanel {
         this._panel = panel;
         this._extensionUri = extensionUri;
         this.authenticationManager = authenticationManager;
+        this._columns = WorkItemsListPanel._readColumnsSetting();
+
+        // Keep the table in step when the columns setting is changed outside the view
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (!e.affectsConfiguration(`azureDevOps.${COLUMNS_SETTING}`)) {
+                return;
+            }
+            const next = WorkItemsListPanel._readColumnsSetting();
+            if (next.join(',') !== this._columns.join(',')) {
+                this._columns = next;
+                this._panel.webview.postMessage({ command: 'setColumns', columns: next });
+            }
+        }, null, this._disposables);
 
         // Load and render work items
         this._loadAndRender();
@@ -94,6 +125,9 @@ export class WorkItemsListPanel {
                             await this._deleteWorkItems(message.ids);
                         }
                         break;
+                    case 'setColumns':
+                        await this._saveColumns(message.columns);
+                        break;
                     case 'editTitle':
                         if (message.id && message.title) {
                             await this._updateWorkItemTitle(message.id, message.title);
@@ -111,6 +145,22 @@ export class WorkItemsListPanel {
 
     public async refresh() {
         await this._loadAndRender();
+    }
+
+    private static _readColumnsSetting(): WorkItemColumnId[] {
+        return resolveVisibleColumns(
+            vscode.workspace.getConfiguration('azureDevOps').get<unknown>(COLUMNS_SETTING)
+        );
+    }
+
+    private async _saveColumns(columns: unknown) {
+        const next = resolveVisibleColumns(columns);
+        this._columns = next;
+        try {
+            await vscode.workspace.getConfiguration('azureDevOps').update(COLUMNS_SETTING, next, vscode.ConfigurationTarget.Global);
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to save column choice: ${error?.message || error}`);
+        }
     }
 
     private async _changeWorkItemStateWithPicker(workItemId: number) {
@@ -559,7 +609,7 @@ export class WorkItemsListPanel {
             const maxItems = vscode.workspace.getConfiguration('azureDevOps').get<number>('maxWorkItemsToLoad', 200);
 
             // Build WIQL query
-            const wiql = `SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType], [System.AssignedTo], [System.AreaPath], [System.Tags], [Microsoft.VSTS.Common.Priority], [System.ChangedDate] FROM WorkItems WHERE [System.TeamProject] = @project ORDER BY [System.ChangedDate] DESC`;
+            const wiql = `SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType], [System.AssignedTo], [System.AreaPath], [System.IterationPath], [System.Tags], [Microsoft.VSTS.Common.Priority], [System.ChangedDate], [System.CreatedDate] FROM WorkItems WHERE [System.TeamProject] = @project ORDER BY [System.ChangedDate] DESC`;
 
             const response = await axiosInstance.post(
                 `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql`,
@@ -595,7 +645,7 @@ export class WorkItemsListPanel {
                         const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
                             params: {
                                 'ids': batch.join(','),
-                                'fields': 'System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.AreaPath,System.Tags,Microsoft.VSTS.Common.Priority,System.ChangedDate,System.CommentCount'
+                                'fields': 'System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.AreaPath,System.IterationPath,System.Tags,Microsoft.VSTS.Common.Priority,System.ChangedDate,System.CreatedDate,System.CommentCount'
                             }
                         });
                         return detailsResponse.data.value || [];
@@ -631,27 +681,10 @@ export class WorkItemsListPanel {
             const iconUri = this._panel.webview.asWebviewUri(
                 vscode.Uri.joinPath(this._extensionUri, 'media', iconFile)
             );
-            return `<img src="${iconUri}" width="20" height="20" alt="${this.escapeHtml(type)}" title="${this.escapeHtml(type)}" style="vertical-align: middle;">`;
+            return `<img src="${iconUri}" width="16" height="16" alt="${this.escapeHtml(type)}" title="${this.escapeHtml(type)}">`;
         }
 
-        return `<span style="font-size: 16px;">📄</span>`;
-    }
-
-    private _formatDate(dateString: string): string {
-        try {
-            const date = new Date(dateString);
-            return date.toLocaleString('en-US', {
-                month: 'numeric',
-                day: 'numeric',
-                year: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: true
-            });
-        } catch (error) {
-            return '-';
-        }
+        return `<span class="codicon codicon-file" title="${this.escapeHtml(type)}"></span>`;
     }
 
     private _getAvatarHtml(displayName: string, initials: string): string {
@@ -675,12 +708,25 @@ export class WorkItemsListPanel {
         const allTags = this.workItems.flatMap(wi => (wi.fields['System.Tags'] || '').split(';').map((t: string) => t.trim()).filter((t: string) => t));
         const tags = [...new Set(allTags)];
 
+        const cspSource = this._panel.webview.cspSource;
+        const codiconCss = vendorAssetUri(this._panel.webview, this._extensionUri, 'codicons', 'codicon.css');
+        const visibleColumns = this._columns;
+        const hiddenColumnClasses = WORK_ITEM_COLUMNS
+            .filter(c => !visibleColumns.includes(c.id))
+            .map(c => `hide-col-${c.id}`)
+            .join(' ');
+        const rowContext = {
+            typeIconHtml: (type: string) => this._getWorkItemTypeIcon(type),
+            avatarHtml: (displayName: string, initials: string) => this._getAvatarHtml(displayName, initials)
+        };
+
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${this._panel.webview.cspSource} https: data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; style-src ${cspSource} 'unsafe-inline'; font-src ${cspSource}; script-src 'nonce-${nonce}';">
+    <link rel="stylesheet" href="${codiconCss}">
     <title>Work Items</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -697,8 +743,8 @@ export class WorkItemsListPanel {
         .toolbar {
             display: flex;
             align-items: center;
-            gap: 12px;
-            padding: 12px 16px;
+            gap: 8px;
+            padding: 8px 16px;
             background: var(--vscode-sideBar-background);
             border-bottom: 1px solid var(--vscode-panel-border);
             flex-shrink: 0;
@@ -709,7 +755,7 @@ export class WorkItemsListPanel {
             margin-right: auto;
         }
         .toolbar-btn {
-            padding: 6px 12px;
+            padding: 4px 10px;
             background: var(--vscode-button-background);
             color: var(--vscode-button-foreground);
             border: none;
@@ -736,8 +782,9 @@ export class WorkItemsListPanel {
         .filter-bar {
             display: flex;
             align-items: center;
-            gap: 12px;
-            padding: 12px 16px;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 8px 16px;
             background: var(--vscode-editor-background);
             border-bottom: 1px solid var(--vscode-panel-border);
             flex-shrink: 0;
@@ -906,87 +953,93 @@ export class WorkItemsListPanel {
             cursor: not-allowed;
         }
 
-        /* Table Container */
+        .filter-spacer { flex: 1; }
+        .column-picker .filter-dropdown-content {
+            left: auto;
+            right: 0;
+        }
+        .filter-checkbox-item input[type="checkbox"]:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+        .codicon { vertical-align: text-bottom; }
+
+        /* Table: a grid of single-line rows; columns share the width via fr tracks */
         .table-wrapper {
             flex: 1;
-            overflow-x: auto;
-            overflow-y: auto;
+            overflow: auto;
         }
-        .table-container {
-            min-width: max-content;
-            display: table;
-        }
-        table {
-            min-width: 100%;
-            width: max-content;
+        .wi-table {
+            display: block;
+            width: 100%;
+            min-width: var(--wi-min-width, 0px);
             border-collapse: collapse;
-            background: var(--vscode-editor-background);
+            font-size: 13px;
         }
-        thead {
-            background: var(--vscode-sideBar-background);
+        .wi-table thead,
+        .wi-table tbody {
+            display: block;
+        }
+        .wi-table thead {
             position: sticky;
             top: 0;
             z-index: 10;
         }
-        th {
-            padding: 10px 16px;
+        .wi-table tr {
+            display: grid;
+            grid-template-columns: var(--wi-columns);
+            align-items: center;
+            border-bottom: 1px solid var(--vscode-panel-border);
+        }
+        .wi-table thead tr {
+            height: 28px;
+            background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+        }
+        .wi-table tbody tr {
+            height: 30px;
+            cursor: pointer;
+        }
+        .wi-table tbody tr:hover {
+            background: var(--vscode-list-hoverBackground);
+        }
+        .wi-table tbody tr.selected {
+            background: var(--vscode-list-inactiveSelectionBackground);
+        }
+        .wi-table th,
+        .wi-table td {
+            min-width: 0;
+            padding: 0 8px;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+        .wi-table th {
             text-align: left;
             font-weight: 600;
             font-size: 11px;
             color: var(--vscode-foreground);
-            border-bottom: 1px solid var(--vscode-panel-border);
-            white-space: nowrap;
-            background: var(--vscode-sideBar-background);
         }
-        /* Sticky first two columns */
-        th:nth-child(1), td:nth-child(1) {
+        ${columnVisibilityCss('.wi-table')}
+        /* Keep the selection column in view when the table scrolls sideways */
+        .wi-table [data-col="select"] {
             position: sticky;
             left: 0;
-            z-index: 5;
-            background: var(--vscode-sideBar-background);
-        }
-        td:nth-child(1) {
+            z-index: 2;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
             background: var(--vscode-editor-background);
         }
-        tbody tr:hover td:nth-child(1) {
-            background: var(--vscode-list-hoverBackground);
+        .wi-table thead [data-col="select"] {
+            background: var(--vscode-sideBar-background, var(--vscode-editor-background));
         }
-        tbody tr.selected td:nth-child(1) {
-            background: rgba(0, 120, 212, 0.25);
+        .wi-table tbody tr:hover [data-col="select"] {
+            background-image: linear-gradient(var(--vscode-list-hoverBackground), var(--vscode-list-hoverBackground));
         }
-        th:nth-child(2), td:nth-child(2) {
-            position: sticky;
-            left: 36px;
-            z-index: 5;
-            background: var(--vscode-sideBar-background);
-        }
-        td:nth-child(2) {
-            background: var(--vscode-editor-background);
-        }
-        tbody tr:hover td:nth-child(2) {
-            background: var(--vscode-list-hoverBackground);
-        }
-        tbody tr.selected td:nth-child(2) {
-            background: rgba(0, 120, 212, 0.25);
-        }
-        tbody tr {
-            border-bottom: 1px solid var(--vscode-panel-border);
-            cursor: pointer;
-            transition: all 0.15s;
-        }
-        tbody tr:hover {
-            background: var(--vscode-list-hoverBackground);
-        }
-        tbody tr.selected {
-            background: rgba(0, 120, 212, 0.25);
-        }
-        td {
-            padding: 10px 16px;
-            font-size: 13px;
-        }
-        .checkbox-cell {
-            width: 36px;
-            text-align: center;
+        .wi-table tbody tr.selected [data-col="select"] {
+            background-image: linear-gradient(var(--vscode-list-inactiveSelectionBackground), var(--vscode-list-inactiveSelectionBackground));
         }
         /* Circle checkbox - hidden until hover or checked */
         .checkbox-cell input[type="checkbox"],
@@ -1006,17 +1059,15 @@ export class WorkItemsListPanel {
             opacity: 0;
             transition: all 0.15s ease;
         }
-        /* Show checkbox on row hover - grey circle */
         tbody tr:hover .checkbox-cell input[type="checkbox"],
         tbody tr:hover .row-checkbox,
         thead tr:hover .checkbox-cell input[type="checkbox"] {
             opacity: 1;
-            border-color: #6b6b6b;
-            background: transparent;
+            border-color: var(--vscode-checkbox-border, #6b6b6b);
         }
-        /* Keep checked checkboxes visible */
         .checkbox-cell input[type="checkbox"]:checked,
-        .row-checkbox:checked {
+        .row-checkbox:checked,
+        .checkbox-cell input[type="checkbox"]:indeterminate {
             opacity: 1;
             background: var(--vscode-button-background, #0e639c);
             border-color: var(--vscode-button-background, #0e639c);
@@ -1037,105 +1088,123 @@ export class WorkItemsListPanel {
             border-width: 0 2px 2px 0;
             transform: rotate(45deg);
         }
-        .checkbox-cell input[type="checkbox"]:focus,
-        .row-checkbox:focus {
-            outline: none;
-            opacity: 1;
-        }
-        /* Header checkbox - also hidden until hover */
-        thead .checkbox-cell input[type="checkbox"] {
-            opacity: 0;
-            border-color: transparent;
-        }
-        thead .checkbox-cell input[type="checkbox"]:hover,
-        thead .checkbox-cell input[type="checkbox"]:checked {
+        .checkbox-cell input[type="checkbox"]:focus-visible,
+        .row-checkbox:focus-visible {
+            outline: 1px solid var(--vscode-focusBorder);
             opacity: 1;
         }
         .work-item-id {
-            font-family: 'Consolas', monospace;
-            color: var(--vscode-foreground);
-            font-weight: 500;
+            font-family: var(--vscode-editor-font-family, monospace);
+            font-size: 12px;
         }
-        /* Comments column */
-        .comments-cell {
+        .wi-table td.title-cell {
             display: flex;
             align-items: center;
-            gap: 4px;
-            color: var(--vscode-foreground);
-            font-size: 12px;
-        }
-        .comments-icon {
-            width: 16px;
-            height: 16px;
-            opacity: 1;
-        }
-        .comments-count {
-            font-size: 12px;
-        }
-        /* Activity date */
-        .activity-date {
-            font-size: 12px;
-            color: var(--vscode-foreground);
+            gap: 6px;
+            height: 100%;
         }
         .type-icon {
             display: inline-flex;
+            flex-shrink: 0;
+        }
+        .type-icon img { display: block; }
+        .title-text {
+            font-weight: 600;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .title-cell input {
+            flex: 1;
+            min-width: 0;
+        }
+        .cell-flex {
+            display: flex;
             align-items: center;
             gap: 6px;
-            font-size: 12px;
+            min-width: 0;
+        }
+        .truncate {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         .state-pill {
-            display: inline-block;
-            padding: 3px 10px;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 1px 8px;
             border-radius: 10px;
             font-size: 11px;
             font-weight: 600;
+            background: var(--vscode-badge-background);
+            color: var(--vscode-badge-foreground);
         }
-        .state-to-do { background: #0078d414; color: #0078d4; }
-        .state-doing { background: #ffa50014; color: #ffa500; }
-        .state-done { background: #107c1014; color: #107c10; }
-        .assignee-cell {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
+        .state-to-do, .state-new, .state-proposed { background: #0078d422; color: var(--vscode-textLink-foreground, #0078d4); }
+        .state-doing, .state-active, .state-in-progress, .state-committed { background: #ffa50022; color: var(--vscode-editorWarning-foreground, #ffa500); }
+        .state-done, .state-closed, .state-resolved, .state-completed { background: #107c1022; color: var(--vscode-testing-iconPassed, #107c10); }
         .avatar {
-            width: 24px;
-            height: 24px;
+            flex-shrink: 0;
+            width: 20px;
+            height: 20px;
             border-radius: 50%;
-            display: flex;
+            display: inline-flex;
             align-items: center;
             justify-content: center;
             /* Colors set dynamically via JavaScript based on user */
-            font-size: 10px;
+            font-size: 9px;
             font-weight: 600;
+            overflow: hidden;
         }
         .unassigned-avatar {
-            width: 24px;
-            height: 24px;
+            width: 20px;
+            height: 20px;
             filter: brightness(0) invert(1);
         }
+        body.vscode-light .unassigned-avatar { filter: none; }
         .avatar:has(.unassigned-avatar) {
             background: rgba(139, 139, 139, 0.3);
         }
+        /* Tags stay on one line; the script folds whatever does not fit into "+N" */
         .tags {
             display: flex;
             gap: 4px;
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
+            overflow: hidden;
+            min-width: 0;
         }
         .tag {
-            padding: 2px 8px;
-            background: rgba(33, 150, 243, 0.2);
-            color: #2196f3;
-            border-radius: 10px;
-            font-size: 10px;
+            flex: 0 0 auto;
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding: 1px 6px;
+            border-radius: 9px;
+            font-size: 11px;
+            line-height: 16px;
+            background: var(--vscode-badge-background);
+            color: var(--vscode-badge-foreground);
         }
+        .tags:not(.measuring) .tag:first-child {
+            flex-shrink: 1;
+            min-width: 24px;
+        }
+        .tags [hidden] { display: none !important; }
+        .tag-more {
+            opacity: 0.85;
+        }
+        .comments-count { font-size: 12px; }
+        .wi-table td[data-col="changedDate"],
+        .wi-table td[data-col="createdDate"] { font-size: 12px; }
         .empty-state {
             text-align: center;
             padding: 60px 20px;
             color: var(--vscode-descriptionForeground);
         }
         .empty-icon {
-            font-size: 48px;
+            font-size: 48px !important;
             margin-bottom: 12px;
             opacity: 0.5;
         }
@@ -1143,20 +1212,24 @@ export class WorkItemsListPanel {
             opacity: 0;
             transition: opacity 0.2s;
         }
-        tr:hover .cell-actions {
+        tr:hover .cell-actions,
+        .cell-actions:focus-visible {
             opacity: 1;
         }
         .action-btn {
+            flex-shrink: 0;
+            margin-left: auto;
+            display: inline-flex;
+            align-items: center;
             background: transparent;
             border: none;
             color: var(--vscode-foreground);
             cursor: pointer;
-            padding: 2px 6px;
+            padding: 1px 2px;
             border-radius: 3px;
-            font-size: 11px;
         }
         .action-btn:hover {
-            background: var(--vscode-button-secondaryHoverBackground);
+            background: var(--vscode-toolbar-hoverBackground, var(--vscode-button-secondaryHoverBackground));
         }
     </style>
 </head>
@@ -1175,11 +1248,11 @@ export class WorkItemsListPanel {
             </button>
         </div>
         <button id="refreshBtn" class="toolbar-btn-secondary toolbar-btn" style="${this.workItems.length === 0 ? 'margin-left: auto;' : ''}">
-            <span>🔄</span>
+            <span class="codicon codicon-refresh"></span>
             <span>Refresh</span>
         </button>
         <button id="createWorkItemBtn" class="toolbar-btn">
-            <span>+</span>
+            <span class="codicon codicon-add"></span>
             <span>New Work Item</span>
         </button>
     </div>
@@ -1263,93 +1336,40 @@ export class WorkItemsListPanel {
                 <button class="filter-clear-btn" id="tagsClearBtn" type="button" disabled>✕ Clear</button>
             </div>
         </div>
+
+        <div class="filter-spacer"></div>
+
+        <div class="filter-dropdown column-picker" id="columnsDropdown">
+            <button class="toolbar-btn toolbar-btn-secondary" id="columnsDropdownBtn" type="button" title="Choose which columns to show" aria-haspopup="true" aria-expanded="false">
+                <span class="codicon codicon-settings"></span>
+                <span>Columns</span>
+            </button>
+            <div class="filter-dropdown-content" id="columnsDropdownContent" role="menu">
+                ${WORK_ITEM_COLUMNS.map(c => `
+                    <label class="filter-checkbox-item"${c.required ? ' title="Always shown"' : ''}>
+                        <input type="checkbox" name="column" value="${c.id}"${visibleColumns.includes(c.id) ? ' checked' : ''}${c.required ? ' disabled' : ''}>
+                        ${this.escapeHtml(c.label)}
+                    </label>
+                `).join('')}
+                <div class="filter-divider" style="margin: 4px 0; height: 1px; width: 100%;"></div>
+                <button class="filter-clear-btn" id="columnsResetBtn" type="button">Reset to defaults</button>
+            </div>
+        </div>
     </div>
 
     <div class="table-wrapper">
         ${this.workItems.length > 0 ? `
-        <div class="table-container">
-            <table id="workItemsTable">
-                <thead>
-                    <tr>
-                        <th class="checkbox-cell"><input type="checkbox" id="selectAllCheckbox"></th>
-                        <th style="width: 80px;">Id</th>
-                        <th style="width: 50px;"></th>
-                        <th style="min-width: 300px;">Title</th>
-                        <th style="width: 120px;">State</th>
-                        <th style="width: 180px;">Assigned to</th>
-                        <th style="width: 200px;">Area path</th>
-                        <th style="width: 200px;">Tags</th>
-                        <th style="width: 100px;">Comments</th>
-                        <th style="width: 150px;">Activity date</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${this.workItems.map(wi => {
-                        const fields = wi.fields;
-                        const id = wi.id;
-                        const title = fields['System.Title'] || '';
-                        const type = fields['System.WorkItemType'] || '';
-                        const state = fields['System.State'] || '';
-                        const assignedTo = fields['System.AssignedTo'];
-                        const areaPath = fields['System.AreaPath'] || '';
-                        const tags = fields['System.Tags'] || '';
-                        const commentCount = fields['System.CommentCount'] || 0;
-                        const changedDate = fields['System.ChangedDate'] || '';
-
-                        const stateClass = state.toLowerCase().replace(/\s+/g, '-');
-                        const icon = this._getWorkItemTypeIcon(type);
-                        const displayName = assignedTo?.displayName || 'Unassigned';
-                        const initials = displayName !== 'Unassigned' ? displayName.split(' ').map((n: string) => n[0]).join('').substring(0, 2) : '?';
-                        const avatarContent = this._getAvatarHtml(displayName, initials);
-
-                        // Format the changed date
-                        const formattedDate = changedDate ? this._formatDate(changedDate) : '-';
-
-                        return `
-                            <tr data-id="${id}" data-type="${this.escapeHtml(type)}" data-state="${this.escapeHtml(state)}" data-assignee="${this.escapeHtml(assignedTo?.displayName || 'Unassigned')}" data-area="${this.escapeHtml(areaPath)}" data-tags="${this.escapeHtml(tags)}" class="work-item-row">
-                                <td class="checkbox-cell"><input type="checkbox" class="row-checkbox" data-id="${id}"></td>
-                                <td class="clickable-cell"><span class="work-item-id">${id}</span></td>
-                                <td class="clickable-cell" style="text-align: center;">${icon}</td>
-                                <td class="title-cell">
-                                    <strong>${this.escapeHtml(title)}</strong>
-                                </td>
-                                <td class="clickable-cell">
-                                    <span class="state-pill state-${this.escapeHtml(stateClass)}">${this.escapeHtml(state)}</span>
-                                    <button class="action-btn cell-actions change-state-btn" data-id="${id}">⋯</button>
-                                </td>
-                                <td class="clickable-cell">
-                                    <div class="assignee-cell">
-                                        <div class="avatar">${avatarContent}</div>
-                                        <span>${this.escapeHtml(displayName)}</span>
-                                        <button class="action-btn cell-actions change-assignee-btn" data-id="${id}">⋯</button>
-                                    </div>
-                                </td>
-                                <td class="clickable-cell">${this.escapeHtml(areaPath)}</td>
-                                <td class="clickable-cell">
-                                    <div class="tags">
-                                        ${tags ? tags.split(';').map(tag => `<span class="tag">${this.escapeHtml(tag.trim())}</span>`).join('') : ''}
-                                    </div>
-                                </td>
-                                <td class="clickable-cell">
-                                    <div class="comments-cell">
-                                        <svg class="comments-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                                        </svg>
-                                        <span class="comments-count">${commentCount}</span>
-                                    </div>
-                                </td>
-                                <td class="clickable-cell">
-                                    <span class="activity-date">${formattedDate}</span>
-                                </td>
-                            </tr>
-                        `;
-                    }).join('')}
-                </tbody>
-            </table>
-        </div>
+        <table id="workItemsTable" class="wi-table ${hiddenColumnClasses}" role="table" aria-label="Work items" style="--wi-columns: ${gridTemplateFor(visibleColumns)}; --wi-min-width: ${minTableWidthFor(visibleColumns)}px;">
+            <thead role="rowgroup">
+                ${renderHeaderRow()}
+            </thead>
+            <tbody role="rowgroup">
+                ${this.workItems.map(wi => renderWorkItemRow(wi, rowContext)).join('')}
+            </tbody>
+        </table>
         ` : `
         <div class="empty-state">
-            <div class="empty-icon">📋</div>
+            <div class="empty-icon codicon codicon-checklist"></div>
             <div>No work items found</div>
         </div>
         `}
@@ -1359,6 +1379,112 @@ export class WorkItemsListPanel {
         (function() {
             const vscode = acquireVsCodeApi();
             const selectedIds = new Set();
+            const ALL_COLUMNS = ${serializeForScript(WORK_ITEM_COLUMNS)};
+            const DEFAULT_COLUMNS = ${serializeForScript(DEFAULT_WORK_ITEM_COLUMNS)};
+            const CHECKBOX_COLUMN_WIDTH = ${CHECKBOX_COLUMN_WIDTH};
+            let visibleColumns = ${serializeForScript(visibleColumns)};
+
+            // Show the chosen columns and size the grid tracks to match
+            function applyColumns() {
+                const table = document.getElementById('workItemsTable');
+                const shown = new Set(visibleColumns);
+                document.querySelectorAll('#columnsDropdownContent input[name="column"]').forEach(cb => {
+                    cb.checked = shown.has(cb.value);
+                });
+                if (!table) return;
+                const tracks = [CHECKBOX_COLUMN_WIDTH + 'px'];
+                let minWidth = CHECKBOX_COLUMN_WIDTH;
+                ALL_COLUMNS.forEach(col => {
+                    const on = shown.has(col.id);
+                    table.classList.toggle('hide-col-' + col.id, !on);
+                    if (on) {
+                        tracks.push(col.track);
+                        minWidth += col.minWidth;
+                    }
+                });
+                table.style.setProperty('--wi-columns', tracks.join(' '));
+                table.style.setProperty('--wi-min-width', minWidth + 'px');
+                scheduleFitTags();
+            }
+
+            function setColumns(columns, persist) {
+                const wanted = new Set(columns);
+                visibleColumns = ALL_COLUMNS.filter(c => c.required || wanted.has(c.id)).map(c => c.id);
+                applyColumns();
+                if (persist) {
+                    vscode.postMessage({ command: 'setColumns', columns: visibleColumns });
+                }
+            }
+
+            // Fit each row's tags on one line, folding the rest into a "+N" chip.
+            // Works in three passes over all rows (reset, measure, apply) so the browser lays
+            // the table out once, not once per chip.
+            const TAG_GAP = 4;
+
+            function chipsThatFit(widths, available, moreWidth) {
+                const total = widths.reduce((sum, w) => sum + w, 0) + TAG_GAP * Math.max(0, widths.length - 1);
+                if (total <= available) return widths.length;
+                let used = moreWidth;
+                let count = 0;
+                for (const w of widths) {
+                    if (used + w + TAG_GAP > available) break;
+                    used += w + TAG_GAP;
+                    count++;
+                }
+                return Math.max(1, count);
+            }
+
+            function fitAllTags(containers) {
+                const jobs = [];
+                containers.forEach(container => {
+                    const chips = Array.from(container.querySelectorAll('.tag:not(.tag-more)'));
+                    const more = container.querySelector('.tag-more');
+                    if (!more || chips.length === 0) return;
+                    chips.forEach(c => { c.hidden = false; });
+                    more.textContent = '+' + chips.length;
+                    more.hidden = false;
+                    container.classList.add('measuring');
+                    jobs.push({ container, chips, more });
+                });
+                jobs.forEach(job => {
+                    job.available = job.container.clientWidth;
+                    job.widths = job.chips.map(c => c.offsetWidth);
+                    job.moreWidth = job.more.offsetWidth;
+                });
+                jobs.forEach(job => {
+                    job.container.classList.remove('measuring');
+                    const keep = job.available === 0 ? job.chips.length : chipsThatFit(job.widths, job.available, job.moreWidth);
+                    job.chips.forEach((c, i) => { c.hidden = i >= keep; });
+                    const hiddenCount = job.chips.length - keep;
+                    job.more.textContent = '+' + hiddenCount;
+                    job.more.hidden = hiddenCount === 0;
+                });
+            }
+
+            let fitPending = false;
+            function scheduleFitTags() {
+                if (fitPending) return;
+                fitPending = true;
+                requestAnimationFrame(() => {
+                    fitPending = false;
+                    const table = document.getElementById('workItemsTable');
+                    if (!table || table.classList.contains('hide-col-tags')) return;
+                    const containers = [];
+                    table.querySelectorAll('tbody tr').forEach(row => {
+                        if (row.style.display === 'none') return;
+                        const tags = row.querySelector('.tags');
+                        if (tags) containers.push(tags);
+                    });
+                    fitAllTags(containers);
+                });
+            }
+
+            window.addEventListener('message', event => {
+                const message = event.data;
+                if (message && message.command === 'setColumns' && Array.isArray(message.columns)) {
+                    setColumns(message.columns, false);
+                }
+            });
 
             // Avatar color utility - generates consistent colors based on display name
             function getAvatarColor(displayName) {
@@ -1539,10 +1665,11 @@ export class WorkItemsListPanel {
                 });
 
                 updateSelectAllCheckbox();
+                scheduleFitTags();
             }
 
             function editTitle(id, cell) {
-                const strong = cell.querySelector('strong');
+                const strong = cell.querySelector('.title-text');
                 if (!strong) return;
 
                 const currentTitle = strong.textContent.trim();
@@ -1685,8 +1812,35 @@ export class WorkItemsListPanel {
                     tagsDropdownBtn.addEventListener('click', () => toggleDropdown('tagsDropdownContent'));
                 }
 
+                // Column picker
+                const columnsDropdownBtn = document.getElementById('columnsDropdownBtn');
+                if (columnsDropdownBtn) {
+                    columnsDropdownBtn.addEventListener('click', () => {
+                        toggleDropdown('columnsDropdownContent');
+                        const open = document.getElementById('columnsDropdownContent').classList.contains('show');
+                        columnsDropdownBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                    });
+                }
+                document.querySelectorAll('#columnsDropdownContent input[name="column"]').forEach(cb => {
+                    cb.addEventListener('change', () => {
+                        const checked = Array.from(document.querySelectorAll('#columnsDropdownContent input[name="column"]:checked')).map(c => c.value);
+                        setColumns(checked, true);
+                    });
+                });
+                const columnsResetBtn = document.getElementById('columnsResetBtn');
+                if (columnsResetBtn) {
+                    columnsResetBtn.addEventListener('click', () => setColumns(DEFAULT_COLUMNS, true));
+                }
+
+                // Re-fit tags whenever the available width changes
+                const tableWrapper = document.querySelector('.table-wrapper');
+                if (tableWrapper && typeof ResizeObserver !== 'undefined') {
+                    new ResizeObserver(scheduleFitTags).observe(tableWrapper);
+                }
+                applyColumns();
+
                 // Filter checkboxes
-                document.querySelectorAll('.filter-dropdown-content input[type="checkbox"]').forEach(cb => {
+                document.querySelectorAll('.filter-dropdown-content input[type="checkbox"]:not([name="column"])').forEach(cb => {
                     cb.addEventListener('change', function() {
                         const filterType = this.name;
                         handleFilterChange(filterType, this);
