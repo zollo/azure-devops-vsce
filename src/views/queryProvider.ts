@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { AuthenticationManager } from '../authentication/authenticationManager';
+import { LIST_FIELDS, MAX_IDS_PER_REQUEST } from '../utils/workItemBatches';
 import { WorkItem } from '../models/workItem';
 
 export interface Query {
@@ -175,7 +176,8 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
 
             // Run the query
             const response = await axiosInstance.get(
-                `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql/${query.id}`
+                `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql/${query.id}`,
+                { params: { '$top': MAX_IDS_PER_REQUEST } }
             );
 
             const workItemRefs = response.data.workItems || [];
@@ -189,11 +191,12 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
             const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
                 params: {
                     'ids': workItemIds,
-                    '$expand': 'all'
+                    'fields': LIST_FIELDS.join(','),
+                    'errorPolicy': 'omit'
                 }
             });
 
-            const results = detailsResponse.data.value || [];
+            const results = (detailsResponse.data.value || []).filter((item: any) => item);
             this.queryResults.set(query.id, results);
 
             return results;
@@ -219,7 +222,8 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
 
             const response = await axiosInstance.post(
                 `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql`,
-                { query: wiql }
+                { query: wiql },
+                { params: { '$top': MAX_IDS_PER_REQUEST } }
             );
 
             const workItemRefs = response.data.workItems || [];
@@ -232,11 +236,12 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
             const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
                 params: {
                     'ids': workItemIds,
-                    '$expand': 'all'
+                    'fields': LIST_FIELDS.join(','),
+                    'errorPolicy': 'omit'
                 }
             });
 
-            return detailsResponse.data.value || [];
+            return (detailsResponse.data.value || []).filter((item: any) => item);
         } catch (error) {
             console.error('Failed to run custom query:', error);
             return [];

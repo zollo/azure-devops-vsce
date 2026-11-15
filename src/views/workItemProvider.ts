@@ -3,6 +3,8 @@ import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem, WorkItemTypeEnum, WorkItemStateEnum } from '../models/workItem';
 import { CacheManager } from '../utils/cacheManager';
 import { WorkItemEventManager } from '../events/workItemEventManager';
+import { METADATA_TTL_MS, metadataKey, sharedMetadataCache } from '../utils/metadataCache';
+import { fetchWorkItemsInBatches } from '../utils/workItemBatches';
 
 export type GroupByOption = 'type' | 'state' | 'assignedTo' | 'sprint' | 'none';
 
@@ -197,9 +199,11 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                 // Ignore console logging errors
             }
 
+            // $top stops Azure DevOps returning thousands of ids when only maxItems are shown
             const response = await axiosInstance.post(
                 `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql`,
-                { query: wiql }
+                { query: wiql },
+                { params: { '$top': maxItems } }
             );
 
             const workItemRefs = response.data.workItems || [];
@@ -211,41 +215,22 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             // Get detailed work item information (limit to maxItems)
             const workItemIdsToLoad = workItemRefs.slice(0, maxItems).map((item: any) => item.id);
 
-            // Load in batches of 200 (Azure DevOps API limit) with limited concurrency
-            const BATCH_SIZE = 200;
-            const MAX_CONCURRENT_BATCHES = 3;
-            const batches: number[][] = [];
-
-            for (let i = 0; i < workItemIdsToLoad.length; i += BATCH_SIZE) {
-                batches.push(workItemIdsToLoad.slice(i, i + BATCH_SIZE));
-            }
-
-            const allWorkItems: any[] = [];
-
-            // Process batches in groups of MAX_CONCURRENT_BATCHES
-            for (let i = 0; i < batches.length; i += MAX_CONCURRENT_BATCHES) {
-                const batchGroup = batches.slice(i, i + MAX_CONCURRENT_BATCHES);
-
-                const batchPromises = batchGroup.map(async (batch) => {
-                    try {
-                        const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
-                            params: {
-                                'ids': batch.join(','),
-                                '$expand': 'all'
-                            }
-                        });
-                        return detailsResponse.data.value || [];
-                    } catch (error: any) {
-                        console.error(`Failed to load work items batch:`, error?.message || error);
-                        return [];
-                    }
-                });
-
-                const batchResults = await Promise.all(batchPromises);
-                allWorkItems.push(...batchResults.flat());
-            }
-
-            this.workItems = allWorkItems;
+            // Load in batches of 200 (Azure DevOps API limit), 3 at a time. Relations are
+            // needed to show which items have children; links and other expansions are not.
+            this.workItems = await fetchWorkItemsInBatches<any>(
+                workItemIdsToLoad,
+                async batch => {
+                    const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
+                        params: {
+                            'ids': batch.join(','),
+                            '$expand': 'relations',
+                            'errorPolicy': 'omit'
+                        }
+                    });
+                    return (detailsResponse.data.value || []).filter((item: any) => item);
+                },
+                (error: any) => console.error('Failed to load work items batch:', error?.message || error)
+            );
 
             // Prefetch state categories for all unique work item types
             await this.prefetchStateCategoriesForWorkItems();
@@ -454,11 +439,12 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
 
             if (childIds.length === 0) return [];
 
-            const childResponse = await axiosInstance.get('/_apis/wit/workitems', {
-                params: { 'ids': childIds.join(','), '$expand': 'relations', 'api-version': '7.0' }
+            const children = await fetchWorkItemsInBatches<any>(childIds, async batch => {
+                const childResponse = await axiosInstance.get('/_apis/wit/workitems', {
+                    params: { 'ids': batch.join(','), '$expand': 'relations', 'errorPolicy': 'omit', 'api-version': '7.0' }
+                });
+                return (childResponse.data.value || []).filter((item: any) => item);
             });
-
-            const children = childResponse.data.value || [];
             return children.map((child: any) => {
                 const title = child.fields['System.Title'];
                 const state = child.fields['System.State'];
@@ -550,12 +536,20 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             }
         });
 
-        // Fetch state categories for each unique type
-        const fetchPromises = Array.from(uniqueTypes).map(type =>
-            this.fetchStateCategoriesForType(type)
-        );
-
-        await Promise.all(fetchPromises);
+        // Fetch state categories for each unique type; types already known come from the shared cache
+        const config = this.authenticationManager.getConfig();
+        await Promise.all(Array.from(uniqueTypes).map(async type => {
+            try {
+                const categories = await sharedMetadataCache.getOrLoad(
+                    metadataKey('state-categories', config?.organizationUrl, config?.defaultProject, type),
+                    METADATA_TTL_MS,
+                    () => this.fetchStateCategoriesForType(type)
+                );
+                categories.forEach((category, stateName) => this.stateCategoryCache.set(`${type}:${stateName}`, category));
+            } catch {
+                // Fall back to matching state names
+            }
+        }));
     }
 
     /**
@@ -588,13 +582,12 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                         const stateName = stateInfo.name.toLowerCase();
                         const category = stateInfo.category;
                         stateCategories.set(stateName, category);
-                        // Cache it globally with workItemType:state key
-                        this.stateCategoryCache.set(`${workItemType}:${stateName}`, category);
                     }
                 });
             }
         } catch (error) {
-            // Silently fail - will use fallback logic
+            // Not cached, so the next load tries again; icons fall back to state names meanwhile
+            throw error;
         }
 
         return stateCategories;

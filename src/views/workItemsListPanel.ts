@@ -613,7 +613,8 @@ export class WorkItemsListPanel {
 
             const response = await axiosInstance.post(
                 `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql`,
-                { query: wiql }
+                { query: wiql },
+                { params: { '$top': maxItems } }
             );
 
             const workItemRefs = response.data.workItems || [];
