@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { notifySuccess } from '../utils/notify';
 import * as child_process from 'child_process';
 import { promisify } from 'util';
 
@@ -24,7 +25,7 @@ export class GitIntegration {
     async createBranch(branchName: string, fromBranch: string = 'main'): Promise<boolean> {
         try {
             await exec(`git checkout -b ${branchName} ${fromBranch}`, { cwd: this.workspaceRoot });
-            vscode.window.showInformationMessage(`Created and switched to branch: ${branchName}`);
+            notifySuccess(`Created and switched to branch: ${branchName}`);
             return true;
         } catch (error) {
             console.error('Failed to create branch:', error);
@@ -37,7 +38,7 @@ export class GitIntegration {
         try {
             const commitMessage = `#${workItemId} ${message}`;
             await exec(`git commit -m "${commitMessage}"`, { cwd: this.workspaceRoot });
-            vscode.window.showInformationMessage(`Committed with work item link: #${workItemId}`);
+            notifySuccess(`Committed with work item link: #${workItemId}`);
             return true;
         } catch (error) {
             console.error('Failed to commit:', error);
@@ -132,7 +133,7 @@ export class GitIntegration {
             }
 
             await exec(`git push origin ${branch}`, { cwd: this.workspaceRoot });
-            vscode.window.showInformationMessage(`Pushed ${branch} to remote`);
+            notifySuccess(`Pushed ${branch} to remote`);
             return true;
         } catch (error) {
             console.error('Failed to push:', error);

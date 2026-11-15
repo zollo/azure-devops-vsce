@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { notifySuccess } from '../utils/notify';
 import { vendorAssetUri } from '../utils/webviewAssets';
 import { escapeHtml, jsArg, sanitizeRichText, serializeForScript, webviewCsp } from '../utils/webviewSecurity';
 import { AuthenticationManager } from '../authentication/authenticationManager';
@@ -223,7 +224,7 @@ export class WorkItemPanel {
                     }))
                 });
 
-                vscode.window.showInformationMessage(`✓ Saved`);
+                notifySuccess(`✓ Saved`);
                 await this.refreshWorkItem();
             }
         } catch (error) {
@@ -251,7 +252,7 @@ export class WorkItemPanel {
                 changes: [{ field: '/fields/System.State', newValue: newState }]
             });
 
-            vscode.window.showInformationMessage(`State changed to ${newState}`);
+            notifySuccess(`State changed to ${newState}`);
             await this.refreshWorkItem();
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to change state: ${error}`);
@@ -281,7 +282,7 @@ export class WorkItemPanel {
                 changes: [{ field: '/fields/System.AssignedTo', newValue: currentUser.uniqueName }]
             });
 
-            vscode.window.showInformationMessage('Assigned to you');
+            notifySuccess('Assigned to you');
             await this.refreshWorkItem();
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to assign: ${error}`);
@@ -312,7 +313,7 @@ export class WorkItemPanel {
                 changes: [{ field: '/fields/System.AssignedTo', newValue: uniqueName }]
             });
 
-            vscode.window.showInformationMessage(uniqueName ? 'Assignee updated' : 'Assignee removed');
+            notifySuccess(uniqueName ? 'Assignee updated' : 'Assignee removed');
             await this.refreshWorkItem();
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to update assignee: ${error}`);
@@ -352,7 +353,7 @@ export class WorkItemPanel {
                 changes: [{ field: fieldPath, newValue: value }]
             });
 
-            vscode.window.showInformationMessage('Field updated');
+            notifySuccess('Field updated');
             await this.refreshWorkItem();
         } catch (error: any) {
             console.error('[WorkItemPanel] Failed to update field:', error);
@@ -379,7 +380,7 @@ export class WorkItemPanel {
                 { headers: { 'Content-Type': 'application/json-patch+json' } }
             );
 
-            vscode.window.showInformationMessage('Tags updated');
+            notifySuccess('Tags updated');
             // A new tag should show up in the suggestions straight away
             sharedMetadataCache.invalidate(this.tagsCacheKey());
             await this.refreshWorkItem();
@@ -436,7 +437,7 @@ export class WorkItemPanel {
                 { headers: { 'Content-Type': 'application/json-patch+json' } }
             );
 
-            vscode.window.showInformationMessage(`Uploaded: ${fileName}`);
+            notifySuccess(`Uploaded: ${fileName}`);
             await this.refreshWorkItem();
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to upload attachment: ${error}`);
@@ -460,7 +461,7 @@ export class WorkItemPanel {
             const fs = require('fs');
             fs.writeFileSync(saveUri.fsPath, Buffer.from(response.data));
 
-            vscode.window.showInformationMessage(`Downloaded: ${name}`);
+            notifySuccess(`Downloaded: ${name}`);
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to download attachment: ${error}`);
         }
@@ -495,7 +496,7 @@ export class WorkItemPanel {
                 { headers: { 'Content-Type': 'application/json-patch+json' } }
             );
 
-            vscode.window.showInformationMessage('Attachment removed');
+            notifySuccess('Attachment removed');
             await this.refreshWorkItem();
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to remove attachment: ${error}`);
@@ -550,7 +551,7 @@ export class WorkItemPanel {
                 { params: { 'api-version': '7.0-preview.3' } }
             );
 
-            vscode.window.showInformationMessage('Comment added');
+            notifySuccess('Comment added');
             await this.refreshWorkItem();
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to add comment: ${error}`);
@@ -572,7 +573,7 @@ export class WorkItemPanel {
                 { params: { 'api-version': '7.0-preview.3' } }
             );
 
-            vscode.window.showInformationMessage('Comment updated');
+            notifySuccess('Comment updated');
             await this.refreshWorkItem();
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to update comment: ${error}`);
@@ -601,7 +602,7 @@ export class WorkItemPanel {
                 { params: { 'api-version': '7.0-preview.3' } }
             );
 
-            vscode.window.showInformationMessage('Comment deleted');
+            notifySuccess('Comment deleted');
             await this.refreshWorkItem();
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to delete comment: ${error}`);

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { notifySuccess } from '../utils/notify';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem, WorkItemTypeEnum, WorkItemStateEnum } from '../models/workItem';
 import { CacheManager } from '../utils/cacheManager';
@@ -965,7 +966,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
         }
 
         if (successCount > 0) {
-            vscode.window.showInformationMessage(`Updated ${successCount} work item(s)`);
+            notifySuccess(`Updated ${successCount} work item(s)`);
             this.cacheManager.invalidatePattern('workitems');
             this.refresh();
         }
@@ -1019,7 +1020,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
         }
 
         if (successCount > 0) {
-            vscode.window.showInformationMessage(`Reordered ${successCount} work item(s)`);
+            notifySuccess(`Reordered ${successCount} work item(s)`);
             this.cacheManager.invalidatePattern('workitems');
             this.refresh();
         }

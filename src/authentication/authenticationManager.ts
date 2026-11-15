@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { notifySuccess } from '../utils/notify';
 import axios, { AxiosInstance } from 'axios';
 import { getOrMigratePat } from './patStorage';
 import { classifyProbeStatus, ProbeResult } from './connectionMonitor';
@@ -503,7 +504,7 @@ export class AuthenticationManager {
                 };
                 this.createAxiosInstance();
                 vscode.commands.executeCommand('setContext', 'azureDevOps.signedIn', true);
-                vscode.window.showInformationMessage('PAT authentication configured. Opening setup wizard...');
+                notifySuccess('PAT authentication configured. Opening setup wizard...');
                 await vscode.commands.executeCommand('azureDevOps.setupWizard');
                 return true;
             }
@@ -537,7 +538,7 @@ export class AuthenticationManager {
                 await this.context.secrets.store('ado-session-id', this.session.id);
                 this.onDidChangeSessionEmitter.fire(this.session);
                 vscode.commands.executeCommand('setContext', 'azureDevOps.signedIn', true);
-                vscode.window.showInformationMessage('Successfully signed in! Opening setup wizard...');
+                notifySuccess('Successfully signed in! Opening setup wizard...');
                 
                 // Show setup wizard to configure organization and project
                 await vscode.commands.executeCommand('azureDevOps.setupWizard');
@@ -600,7 +601,7 @@ export class AuthenticationManager {
                 await this.context.secrets.store('ado-tenant-id', tenantId);
                 this.onDidChangeSessionEmitter.fire(this.session);
                 vscode.commands.executeCommand('setContext', 'azureDevOps.signedIn', true);
-                vscode.window.showInformationMessage('Successfully signed in! Opening setup wizard...');
+                notifySuccess('Successfully signed in! Opening setup wizard...');
                 
                 // Show setup wizard to configure organization and project
                 await vscode.commands.executeCommand('azureDevOps.setupWizard');
@@ -637,7 +638,7 @@ export class AuthenticationManager {
         vscode.commands.executeCommand('setContext', 'azureDevOps.signedIn', false);
         vscode.commands.executeCommand('setContext', 'azureDevOps.connected', false);
         console.log('[AuthManager] Disconnected - azureDevOps.signedIn = false');
-        vscode.window.showInformationMessage('Successfully signed out from Azure DevOps');
+        notifySuccess('Successfully signed out from Azure DevOps');
     }
 
     public async refreshConfiguration(): Promise<void> {

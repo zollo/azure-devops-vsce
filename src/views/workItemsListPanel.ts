@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { notifySuccess } from '../utils/notify';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem } from '../models/workItem';
 import { CacheManager } from '../utils/cacheManager';
@@ -218,7 +219,7 @@ export class WorkItemsListPanel {
             }
 
             this._panel.webview.html = this._getHtmlForWebview();
-            vscode.window.showInformationMessage(`Updated state for #${workItemId}`);
+            notifySuccess(`Updated state for #${workItemId}`);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to update state: ${error?.message || error}`);
         }
@@ -321,7 +322,7 @@ export class WorkItemsListPanel {
             }
 
             this._panel.webview.html = this._getHtmlForWebview();
-            vscode.window.showInformationMessage(`Updated assignee for #${workItemId}`);
+            notifySuccess(`Updated assignee for #${workItemId}`);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to update assignee: ${error?.message || error}`);
         }
@@ -370,7 +371,7 @@ export class WorkItemsListPanel {
             });
 
             this._panel.webview.html = this._getHtmlForWebview();
-            vscode.window.showInformationMessage(`Updated state for ${workItemIds.length} work items`);
+            notifySuccess(`Updated state for ${workItemIds.length} work items`);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to bulk update state: ${error?.message || error}`);
         }
@@ -433,7 +434,7 @@ export class WorkItemsListPanel {
             });
 
             this._panel.webview.html = this._getHtmlForWebview();
-            vscode.window.showInformationMessage(`Updated assignee for ${workItemIds.length} work items`);
+            notifySuccess(`Updated assignee for ${workItemIds.length} work items`);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to bulk update assignee: ${error?.message || error}`);
         }
@@ -467,7 +468,7 @@ export class WorkItemsListPanel {
             // Remove from local state instead of full reload
             this.workItems = this.workItems.filter(wi => !workItemIds.includes(wi.id));
             this._panel.webview.html = this._getHtmlForWebview();
-            vscode.window.showInformationMessage(`Deleted ${workItemIds.length} work items`);
+            notifySuccess(`Deleted ${workItemIds.length} work items`);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to delete work items: ${error?.message || error}`);
         }
@@ -502,7 +503,7 @@ export class WorkItemsListPanel {
             }
 
             this._panel.webview.html = this._getHtmlForWebview();
-            vscode.window.showInformationMessage(`Updated title for #${workItemId}`);
+            notifySuccess(`Updated title for #${workItemId}`);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to update title: ${error?.message || error}`);
         }

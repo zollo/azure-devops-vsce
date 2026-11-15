@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { notifySuccess } from '../utils/notify';
 import { vendorAssetUri } from '../utils/webviewAssets';
 import { extractWorkItemIdFromUrl } from '../utils/workItemUrls';
 import { jsArg, safeCssColor, serializeForScript, webviewCsp } from '../utils/webviewSecurity';
@@ -190,7 +191,7 @@ export class BoardPanel {
                         break;
                     case 'copyId':
                         await vscode.env.clipboard.writeText(message.workItemId.toString());
-                        vscode.window.showInformationMessage(`Copied #${message.workItemId} to clipboard`);
+                        notifySuccess(`Copied #${message.workItemId} to clipboard`);
                         break;
                     case 'copyUrl':
                         await this._copyWorkItemUrl(message.workItemId);
@@ -521,7 +522,7 @@ export class BoardPanel {
                     });
 
                     outputChannel.appendLine(`[Board] Team selected: ${selectedTeam.name}`);
-                    vscode.window.showInformationMessage(`Team selected: ${selectedTeam.name}`);
+                    notifySuccess(`Team selected: ${selectedTeam.name}`);
                     return true;
                 } else {
                     outputChannel.appendLine('[Board] User cancelled team selection');
@@ -1402,7 +1403,7 @@ export class BoardPanel {
                 targetState
             });
 
-            vscode.window.showInformationMessage(`Moved #${workItemId} to ${targetColumn}`);
+            notifySuccess(`Moved #${workItemId} to ${targetColumn}`);
 
             // Remove from pending moves after a short delay to ensure backend has propagated
             setTimeout(() => {
@@ -1469,7 +1470,7 @@ export class BoardPanel {
                 ]
             });
 
-            vscode.window.showInformationMessage(`Created ${type} #${response.data.id}`);
+            notifySuccess(`Created ${type} #${response.data.id}`);
 
             // Refresh the board
             await this._loadAndRender();
@@ -1512,7 +1513,7 @@ export class BoardPanel {
                 assignee: currentUser
             });
 
-            vscode.window.showInformationMessage(`Assigned #${workItemId} to you`);
+            notifySuccess(`Assigned #${workItemId} to you`);
 
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to assign: ${error?.message || error}`);
@@ -1540,7 +1541,7 @@ export class BoardPanel {
         if (config) {
             const url = `${config.organizationUrl}/${config.defaultProject}/_workitems/edit/${workItemId}`;
             await vscode.env.clipboard.writeText(url);
-            vscode.window.showInformationMessage('Work item URL copied to clipboard');
+            notifySuccess('Work item URL copied to clipboard');
         }
     }
 
@@ -1572,7 +1573,7 @@ export class BoardPanel {
                 state: newState
             });
 
-            vscode.window.showInformationMessage(`Changed #${workItemId} state to ${newState}`);
+            notifySuccess(`Changed #${workItemId} state to ${newState}`);
 
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to change state: ${error?.message || error}`);
@@ -1602,7 +1603,7 @@ export class BoardPanel {
                 { params: { 'api-version': '7.1-preview.3' } }
             );
 
-            vscode.window.showInformationMessage(`Comment added to #${workItemId}`);
+            notifySuccess(`Comment added to #${workItemId}`);
 
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to add comment: ${error?.message || error}`);
@@ -1634,7 +1635,7 @@ export class BoardPanel {
             );
 
             // No need for full refresh - webview already updated the title
-            vscode.window.showInformationMessage(`Updated title for #${workItemId}`);
+            notifySuccess(`Updated title for #${workItemId}`);
 
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to update title: ${error?.message || error}`);
@@ -1665,7 +1666,7 @@ export class BoardPanel {
             );
 
             // No need for full refresh - webview already updated the effort
-            vscode.window.showInformationMessage(`Updated effort for #${workItemId}`);
+            notifySuccess(`Updated effort for #${workItemId}`);
 
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to update effort: ${error?.message || error}`);
@@ -1728,7 +1729,7 @@ export class BoardPanel {
                 } : null
             });
 
-            vscode.window.showInformationMessage(`Updated assignee for #${workItemId}`);
+            notifySuccess(`Updated assignee for #${workItemId}`);
 
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to update assignee: ${error?.message || error}`);
@@ -1771,7 +1772,7 @@ export class BoardPanel {
             });
 
             await this._loadAndRender();
-            vscode.window.showInformationMessage(`Deleted work item #${workItemId}`);
+            notifySuccess(`Deleted work item #${workItemId}`);
 
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to delete work item: ${error?.message || error}`);
@@ -1834,7 +1835,7 @@ export class BoardPanel {
                 }
             );
 
-            vscode.window.showInformationMessage(`Created ${workItemType} #${newWorkItemId} as child of #${parentWorkItemId}`);
+            notifySuccess(`Created ${workItemType} #${newWorkItemId} as child of #${parentWorkItemId}`);
 
             // Refresh the board
             await this._loadAndRender();
@@ -1953,7 +1954,7 @@ export class BoardPanel {
                 changes: [{ field: '/fields/System.IterationPath', newValue: selected.iterationPath }]
             });
 
-            vscode.window.showInformationMessage(`Moved #${workItemId} to ${selected.label}`);
+            notifySuccess(`Moved #${workItemId} to ${selected.label}`);
             await this._loadAndRender();
 
         } catch (error: any) {
