@@ -3,12 +3,15 @@ import { log } from '../utils/logger';
 import { notifySuccess } from '../utils/notify';
 import { vendorAssetUri } from '../utils/webviewAssets';
 import { extractWorkItemIdFromUrl } from '../utils/workItemUrls';
-import { jsArg, safeCssColor, serializeForScript, webviewCsp } from '../utils/webviewSecurity';
+import { getNonce, jsArg, safeCssColor, serializeForScript, webviewCsp } from '../utils/webviewSecurity';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItemEventManager } from '../events/workItemEventManager';
 import { OrganizationManager } from '../authentication/organizationManager';
 import { outputChannel } from '../extension';
 import { azureDevOps } from '../services/azureDevOpsService';
+
+/** Stands in for the script nonce while comparing renders; replaced before the HTML is shown. */
+const NONCE_PLACEHOLDER = '__BOARD_NONCE__';
 
 interface BoardColumn {
     id: string;
@@ -408,8 +411,9 @@ export class BoardPanel {
             }
 
             try {
-                const html = this._getHtmlForWebview();
-                if (html === this._lastBoardHtml) {
+                // Rendered with a placeholder nonce so unchanged boards compare equal
+                const template = this._getHtmlForWebview(NONCE_PLACEHOLDER);
+                if (template === this._lastBoardHtml) {
                     // Nothing on the board changed: keep the page as it is instead of redrawing it
                     outputChannel.appendLine('[Board] No changes since the last refresh');
                     return;
@@ -419,8 +423,8 @@ export class BoardPanel {
                     this._refreshPendingWhileBusy = true;
                     return;
                 }
-                this._lastBoardHtml = html;
-                this._panel.webview.html = html;
+                this._lastBoardHtml = template;
+                this._panel.webview.html = template.split(NONCE_PLACEHOLDER).join(getNonce());
 
                 // Restore filter state after HTML is loaded
                 if (Object.keys(this._filterState).length > 0) {
@@ -2003,7 +2007,7 @@ export class BoardPanel {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview)}">
+    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview, getNonce())}">
     <title>Loading Board...</title>
     <style>
         body {
@@ -2045,13 +2049,14 @@ export class BoardPanel {
     private _getErrorHtml(message: string, details?: string, actionable?: string): string {
         const detailsHtml = details ? `<p class="error-details">${this._escapeHtml(details)}</p>` : '';
         const actionableHtml = actionable ? `<div class="error-actionable">${this._escapeHtml(actionable)}</div>` : '';
+        const nonce = getNonce();
 
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview)}">
+    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview, nonce)}">
     <title>Board Error</title>
     <style>
         body {
@@ -2123,20 +2128,23 @@ export class BoardPanel {
         <p class="error-message">${this._escapeHtml(message)}</p>
         ${detailsHtml}
         ${actionableHtml}
-        <button onclick="location.reload()">Retry</button>
+        <button id="retry">Retry</button>
     </div>
+    <script nonce="${nonce}">
+        const vscode = acquireVsCodeApi();
+        document.getElementById('retry').addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));
+    </script>
 </body>
 </html>`;
     }
 
-    private _getHtmlForWebview(): string {
+    private _getHtmlForWebview(nonce: string = getNonce()): string {
         if (!this.currentBoard) {
             return this._getErrorHtml('No board data available');
         }
 
         const columns = this.currentBoard.columns;
         const workItems = this.currentBoard.workItems;
-        const boardsJson = serializeForScript(this.availableBoards);
 
         // Extract unique types from work items on the board
         const uniqueTypes = new Set<string>();
@@ -2221,12 +2229,24 @@ export class BoardPanel {
         // Get the codicon font URI from VSCode
         const codiconFontUri = vendorAssetUri(this._panel.webview, this._extensionUri, 'codicons', 'codicon.ttf');
 
+        // Styles and script live in media/board; data for the script goes in #board-data
+        const mediaUri = (...segments: string[]) =>
+            this._panel.webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', ...segments));
+        const boardCssUri = mediaUri('board', 'board.css');
+        const boardJsUri = mediaUri('board', 'board.js');
+        const handlersJsUri = mediaUri('shared', 'webviewHandlers.js');
+        const boardData = {
+            availableBoards: this.availableBoards,
+            currentIterationPath: this._currentIterationPath || '',
+            boardKey: this.boardId
+        };
+
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview)}">
+    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview, nonce)}">
     <title>Board: ${this._escapeHtml(this.boardName)}</title>
     <style>
         @font-face {
@@ -2235,1586 +2255,20 @@ export class BoardPanel {
             src: url('${codiconFontUri}') format('truetype');
         }
     </style>
-    <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-
-        body {
-            font-family: var(--vscode-font-family);
-            background: var(--vscode-editor-background);
-            color: var(--vscode-foreground);
-            overflow-x: auto;
-            min-height: 100vh;
-        }
-
-        /* Codicon Icons */
-        .codicon {
-            font-family: 'codicon';
-            font-size: 16px;
-            display: inline-block;
-            line-height: 1;
-            text-align: center;
-            vertical-align: middle;
-        }
-
-        /* Board Header */
-        .board-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 20px;
-            background: var(--vscode-sideBar-background);
-            border-bottom: 1px solid var(--vscode-panel-border);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        .board-title {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .board-selector {
-            position: relative;
-        }
-
-        .board-selector-btn {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 12px;
-            background: var(--vscode-dropdown-background);
-            border: 1px solid var(--vscode-dropdown-border);
-            border-radius: 4px;
-            color: var(--vscode-dropdown-foreground);
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.15s;
-        }
-
-        .board-selector-btn:hover {
-            background: var(--vscode-list-hoverBackground);
-        }
-
-        .board-selector-btn::after {
-            content: '▼';
-            font-size: 10px;
-            opacity: 0.7;
-        }
-
-        .board-dropdown {
-            display: none;
-            position: absolute;
-            top: 100%;
-            left: 0;
-            min-width: 200px;
-            background: var(--vscode-dropdown-background);
-            border: 1px solid var(--vscode-dropdown-border);
-            border-radius: 4px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-            z-index: 200;
-            margin-top: 4px;
-        }
-
-        .board-dropdown.show {
-            display: block;
-        }
-
-        .board-dropdown-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
-            cursor: pointer;
-            font-size: 13px;
-            transition: background 0.1s;
-        }
-
-        .board-dropdown-item:hover {
-            background: var(--vscode-list-hoverBackground);
-        }
-
-        .board-dropdown-item.active {
-            background: var(--vscode-list-activeSelectionBackground);
-            color: var(--vscode-list-activeSelectionForeground);
-        }
-
-        .board-icon {
-            display: flex;
-            align-items: center;
-            flex-shrink: 0;
-        }
-
-        .board-icon svg {
-            display: block;
-        }
-
-        .board-name {
-            flex: 1;
-        }
-
-        .board-actions {
-            display: flex;
-            gap: 8px;
-        }
-
-        .btn {
-            padding: 6px 12px;
-            background: var(--vscode-button-secondaryBackground);
-            color: var(--vscode-button-secondaryForeground);
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: 500;
-            transition: all 0.15s ease;
-        }
-
-        .btn:hover {
-            background: var(--vscode-button-secondaryHoverBackground);
-        }
-
-        .btn:active {
-            transform: scale(0.95);
-        }
-
-        .btn.icon-btn {
-            padding: 6px 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .btn.icon-btn svg {
-            width: 16px;
-            height: 16px;
-        }
-
-        .btn.icon-btn.active {
-            background: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
-        }
-
-        .btn-primary {
-            background: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
-        }
-
-        .btn-primary:hover {
-            background: var(--vscode-button-hoverBackground);
-        }
-
-        /* Board Container */
-        .board-container {
-            display: flex;
-            gap: 0;
-            min-height: calc(100vh - 120px);
-            overflow-x: auto;
-        }
-
-        /* Columns */
-        .column {
-            flex: 0 0 320px;
-            min-width: 320px;
-            background: var(--vscode-editor-background);
-            border-right: 3px solid var(--vscode-panel-border);
-            display: flex;
-            flex-direction: column;
-            transition: all 0.3s ease;
-        }
-
-        .column.collapsed {
-            flex: 0 0 48px;
-            min-width: 48px;
-        }
-
-        .column.collapsed .column-body,
-        .column.collapsed .add-item-header-btn,
-        .column.collapsed .add-item-form-container {
-            display: none;
-        }
-
-        .column.collapsed .column-header {
-            writing-mode: vertical-rl;
-            text-orientation: mixed;
-            padding: 12px 8px;
-            height: 100%;
-        }
-
-        .column.collapsed .column-title {
-            transform: rotate(180deg);
-        }
-
-        .column.drag-over {
-            /* No visual change */
-        }
-
-        .column.keyboard-focus {
-            /* Removed box-shadow */
-        }
-
-        .column-header {
-            padding: 12px 14px;
-            border-bottom: 3px solid var(--vscode-panel-border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-shrink: 0;
-            cursor: pointer;
-        }
-
-        .column-header-left {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .collapse-btn {
-            background: transparent;
-            border: none;
-            color: var(--vscode-descriptionForeground);
-            cursor: pointer;
-            padding: 2px 4px;
-            border-radius: 3px;
-            font-size: 12px;
-            transition: all 0.1s;
-        }
-
-        .collapse-btn:hover {
-            background: var(--vscode-toolbar-hoverBackground);
-            color: var(--vscode-foreground);
-        }
-
-        .column-title {
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--vscode-foreground);
-        }
-
-        .column-header-right {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .add-item-header-btn {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            padding: 4px 8px;
-            background: transparent;
-            border: 1px solid var(--vscode-input-border);
-            border-radius: 4px;
-            color: var(--vscode-descriptionForeground);
-            font-size: 11px;
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
-
-        .add-item-header-btn:hover {
-            background: var(--vscode-list-hoverBackground);
-            color: var(--vscode-foreground);
-            border-color: var(--vscode-focusBorder);
-        }
-
-        .add-item-header-btn:active {
-            transform: scale(0.95);
-        }
-
-        .add-item-header-btn svg {
-            width: 14px;
-            height: 14px;
-        }
-
-        .add-item-form-container {
-            padding: 0 12px;
-            border-bottom: 1px solid transparent;
-            background: var(--vscode-editor-background);
-            height: 0;
-            opacity: 0;
-            transform: translateY(-10px);
-            transition: height 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-                        opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-                        transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-                        padding 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-                        border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            position: relative;
-            z-index: 100;
-        }
-
-        .add-item-form-container.active {
-            height: 44px;
-            padding: 8px 12px;
-            opacity: 1;
-            transform: translateY(0);
-            border-bottom-color: var(--vscode-panel-border);
-        }
-
-        .add-item-row {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .add-item-type-selector {
-            flex-shrink: 0;
-        }
-
-        .add-item-type-select {
-            padding: 6px 28px 6px 8px;
-            background: var(--vscode-dropdown-background);
-            color: var(--vscode-dropdown-foreground);
-            border: 1px solid var(--vscode-dropdown-border);
-            border-radius: 4px;
-            font-size: 12px;
-            cursor: pointer;
-            min-width: 120px;
-            appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M2 4l4 4 4-4z'/%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 8px center;
-        }
-
-        .add-item-type-select:hover {
-            border-color: var(--vscode-focusBorder);
-        }
-
-        .add-item-type-select:focus {
-            outline: none;
-            border-color: var(--vscode-focusBorder);
-        }
-
-        .add-item-form-container .add-item-input {
-            flex: 1;
-            min-width: 0;
-            margin-bottom: 0;
-        }
-
-        .add-item-submit {
-            flex-shrink: 0;
-            white-space: nowrap;
-        }
-
-        /* Custom Type Dropdown - Icon Only */
-        .add-item-type-dropdown {
-            position: relative;
-            flex-shrink: 0;
-        }
-
-        .add-item-type-btn {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            padding: 6px 8px;
-            background: var(--vscode-dropdown-background);
-            color: var(--vscode-dropdown-foreground);
-            border: 1px solid var(--vscode-dropdown-border);
-            border-radius: 4px;
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
-
-        .add-item-type-btn:hover {
-            border-color: var(--vscode-focusBorder);
-            background: var(--vscode-list-hoverBackground);
-        }
-
-        .add-item-type-btn .type-icon {
-            font-size: 16px;
-            line-height: 1;
-        }
-
-        .add-item-type-btn .dropdown-arrow {
-            opacity: 0.7;
-            transition: transform 0.2s ease;
-        }
-
-        .add-item-type-dropdown.open .add-item-type-btn .dropdown-arrow {
-            transform: rotate(180deg);
-        }
-
-        .add-item-type-menu {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            margin-top: 4px;
-            background: var(--vscode-dropdown-background);
-            border: 1px solid var(--vscode-dropdown-border);
-            border-radius: 6px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-            z-index: 10000;
-            display: flex;
-            flex-direction: row;
-            gap: 2px;
-            padding: 6px;
-            opacity: 0;
-            transform: translateY(-8px) scale(0.95);
-            pointer-events: none;
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .add-item-type-dropdown.open .add-item-type-menu {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-            pointer-events: auto;
-        }
-
-        .type-menu-item {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 32px;
-            height: 32px;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
-
-        .type-menu-item:hover {
-            background: var(--vscode-list-hoverBackground);
-            transform: scale(1.1);
-        }
-
-        .type-menu-item.selected {
-            background: var(--vscode-list-activeSelectionBackground);
-        }
-
-        .type-menu-item .type-icon {
-            font-size: 18px;
-            line-height: 1;
-        }
-
-        .wip-badge {
-            font-size: 11px;
-            font-weight: 600;
-            padding: 2px 8px;
-            border-radius: 10px;
-            background: var(--vscode-badge-background);
-            color: var(--vscode-badge-foreground);
-        }
-
-        .wip-badge.warning {
-            background: #f59e0b;
-            color: #000;
-        }
-
-        .wip-badge.danger {
-            background: #ef4444;
-            color: #fff;
-        }
-
-        .column-body {
-            flex: 1;
-            overflow-y: auto;
-            padding: 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .column-body.scrollbar-thin {
-            scrollbar-width: thin;
-            scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
-        }
-
-        /* Drop Placeholder */
-        .drop-placeholder {
-            display: none;
-        }
-
-        /* Work Item Cards - MODERN DESIGN */
-        .card {
-            background: var(--vscode-editor-background);
-            border: 2px solid rgba(128, 128, 128, 0.45);
-            border-left: 6px solid var(--card-type-color, #4396C2);
-            border-radius: 6px;
-            padding: 12px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            position: relative;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
-            color: #ffffff;
-        }
-
-        .card.has-children {
-            padding-bottom: 36px;
-        }
-
-        .card:hover {
-            background: var(--vscode-list-hoverBackground);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-        }
-
-        .card.dragging {
-            opacity: 0.5;
-        }
-
-        .card.keyboard-moving {
-            outline: 2px solid var(--card-type-color, #4396C2);
-            box-shadow: 0 0 0 4px rgba(67, 150, 194, 0.2);
-        }
-
-        /* Card click animation - smooth pulse effect */
-        .card.clicking {
-            animation: cardPulse 200ms ease-out;
-        }
-
-        @keyframes cardPulse {
-            0% {
-                transform: scale(1);
-            }
-            50% {
-                transform: scale(0.95);
-            }
-            100% {
-                transform: scale(1);
-            }
-        }
-
-        /* Work Item Type Colors - Azure DevOps Standard */
-        .card[data-type="User Story"] { --card-type-color: #4396C2; }
-        .card[data-type="Product Backlog Item"] { --card-type-color: #4396C2; }
-        .card[data-type="Requirement"] { --card-type-color: #4396C2; }
-        .card[data-type="Feature"] { --card-type-color: #773b93; }
-        .card[data-type="Epic"] { --card-type-color: #ff7b00; }
-        .card[data-type="Bug"] { --card-type-color: #cc293d; }
-        .card[data-type="Task"] { --card-type-color: #f2cb1d; }
-        .card[data-type="Issue"] { --card-type-color: #207752; }
-        .card[data-type="Impediment"] { --card-type-color: #b4009e; }
-        .card[data-type="Risk"] { --card-type-color: #ff9d00; }
-        .card[data-type="Change Request"] { --card-type-color: #b4009e; }
-        .card[data-type="Review"] { --card-type-color: #773b93; }
-        .card[data-type="Test Case"] { --card-type-color: #004b50; }
-        .card[data-type="Test Plan"] { --card-type-color: #004b50; }
-        .card[data-type="Test Suite"] { --card-type-color: #004b50; }
-
-        /* Card Type Icon */
-        .card-type-icon {
-            width: 18px;
-            height: 18px;
-            font-size: 16px;
-            flex-shrink: 0;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .card-header {
-            display: flex;
-            align-items: flex-start;
-            gap: 8px;
-            margin-bottom: 8px;
-            position: relative;
-        }
-
-        .card-header-content {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .card-menu-btn {
-            background: transparent;
-            border: none;
-            color: var(--vscode-foreground);
-            cursor: pointer;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 16px;
-            line-height: 1;
-            opacity: 0;
-            transition: all 0.2s;
-        }
-
-        .card:hover .card-menu-btn {
-            opacity: 0.6;
-        }
-
-        .card-menu-btn:hover {
-            opacity: 1 !important;
-            background: var(--vscode-toolbar-hoverBackground);
-        }
-
-        .card-id-title {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 4px;
-        }
-
-        .card-id {
-            font-size: 13px;
-            font-weight: 600;
-            color: #ffffff;
-            cursor: pointer;
-        }
-
-        .card-id:hover {
-            text-decoration: underline;
-        }
-
-        .card-title {
-            font-size: 13px;
-            color: #ffffff;
-            line-height: 1.4;
-            word-wrap: break-word;
-        }
-
-        .card-title-editable {
-            width: 100%;
-            background: var(--vscode-input-background);
-            border: 1px solid var(--vscode-focusBorder);
-            border-radius: 4px;
-            padding: 4px 8px;
-            font-size: 13px;
-            color: var(--vscode-input-foreground);
-            font-family: inherit;
-        }
-
-        .card-title-editable:focus {
-            outline: none;
-        }
-
-        /* Status Indicator */
-        .card-status {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 8px;
-        }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-        }
-
-        .status-dot.todo {
-            background: #71717a;
-        }
-
-        .status-dot.doing {
-            background: #3b82f6;
-        }
-
-        .status-dot.done {
-            background: #22c55e;
-        }
-
-        .status-label {
-            font-size: 12px;
-            color: #ffffff;
-        }
-
-        /* Assignee */
-        .card-assignee {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 12px;
-            cursor: pointer;
-            padding: 4px;
-            margin: 0 -4px 8px -4px;
-            border-radius: 4px;
-            transition: all 0.2s;
-        }
-
-        .card-assignee:hover {
-            background: var(--vscode-list-hoverBackground);
-        }
-
-        .card-avatar {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-            font-weight: 500;
-            /* Colors set dynamically via JavaScript based on user */
-        }
-
-        .card-avatar.unassigned {
-            background: rgba(139, 139, 139, 0.3);
-            color: #8b8b8b;
-        }
-
-        .card-assignee-name {
-            font-size: 12px;
-            color: #ffffff;
-        }
-
-        .card-assignee-name.unassigned-text {
-            color: #ffffff;
-            opacity: 0.6;
-            font-style: italic;
-        }
-
-        /* Effort */
-        .card-effort {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 8px;
-            font-size: 12px;
-            color: #ffffff;
-        }
-
-        .card-effort-label {
-            color: rgba(255, 255, 255, 0.7);
-            flex-shrink: 0;
-        }
-
-        .card-effort-value {
-            font-weight: 500;
-            cursor: pointer;
-            padding: 2px 8px;
-            border-radius: 4px;
-            transition: background 0.2s;
-            flex: 1;
-            text-align: center;
-        }
-
-        .card-effort-value:hover {
-            background: var(--vscode-list-hoverBackground);
-        }
-
-        .card-effort-input {
-            flex: 1;
-            text-align: center;
-            background: var(--vscode-input-background);
-            border: 1px solid var(--vscode-focusBorder);
-            border-radius: 4px;
-            padding: 2px 4px;
-            font-size: 12px;
-            color: var(--vscode-input-foreground);
-            font-family: inherit;
-        }
-
-        .card-effort-input:focus {
-            outline: none;
-        }
-
-        /* Tags */
-        .card-tags {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-        }
-
-        .tag {
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 11px;
-            font-weight: 500;
-            border: 1px solid;
-            white-space: nowrap;
-        }
-
-        /* Card Footer */
-        .card-footer {
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid var(--vscode-panel-border);
-        }
-
-        /* Child work items indicator */
-        .child-indicators-container {
-            position: absolute;
-            bottom: 8px;
-            left: 8px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        .child-indicator-item {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            font-size: 11px;
-            color: #ffffff;
-            font-weight: 500;
-            cursor: pointer;
-            padding: 4px 6px;
-            border-radius: 4px;
-            transition: background-color 0.2s;
-        }
-
-        .child-indicator-item:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-
-        .child-indicator-item svg {
-            flex-shrink: 0;
-        }
-
-        .child-indicator-item.completed {
-            text-decoration: line-through;
-        }
-
-        .child-count {
-            line-height: 1;
-        }
-
-        /* Expandable checklist styles - Match Azure DevOps browser exactly */
-        .child-checklist {
-            max-height: 0;
-            overflow: hidden;
-            transition: max-height 0.35s ease-in-out, opacity 0.25s ease-in-out, margin-top 0.35s ease-in-out;
-            opacity: 0;
-            margin-top: 0;
-        }
-
-        .child-checklist.expanded {
-            max-height: 1200px;
-            opacity: 1;
-            margin-top: 8px;
-        }
-
-        .checklist-content {
-            padding: 4px 0 0 0;
-        }
-
-        /* "Add Bug/Task" button - appears first, subtle styling */
-        .checklist-add-item {
-            margin-bottom: 6px;
-            padding: 0;
-        }
-
-        .checklist-add-button {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            background: rgba(255, 255, 255, 0.03);
-            border: none;
-            color: #ffffff;
-            padding: 5px 8px;
-            border-radius: 3px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: 400;
-            width: 100%;
-            text-align: left;
-            transition: all 0.2s;
-        }
-
-        .checklist-add-button:hover {
-            background-color: rgba(255, 255, 255, 0.08);
-        }
-
-        .add-icon {
-            font-size: 14px;
-            font-weight: bold;
-            line-height: 1;
-        }
-
-        /* Bug/Task item row - [checkbox][icon][avatar][title] */
-        .checklist-item {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 5px 4px;
-            transition: background-color 0.2s;
-            min-height: 28px;
-        }
-
-        .checklist-item:hover {
-            background-color: rgba(255, 255, 255, 0.05);
-            border-radius: 3px;
-        }
-
-        .checklist-item.done .checklist-title {
-            text-decoration: line-through;
-        }
-
-        /* Checkbox - 16x16px, matches filter checkboxes */
-        .checklist-checkbox {
-            flex-shrink: 0;
-            width: 16px;
-            height: 16px;
-            cursor: pointer;
-            margin: 0;
-            /* Custom checkbox styling to match filter checkboxes */
-            -webkit-appearance: none;
-            -moz-appearance: none;
-            appearance: none;
-            border: 1.5px solid var(--vscode-foreground, #cccccc);
-            border-radius: 3px;
-            background: var(--vscode-checkbox-background, transparent);
-            position: relative;
-            vertical-align: middle;
-        }
-
-        .checklist-checkbox:hover {
-            border-color: var(--vscode-focusBorder, #007acc);
-        }
-
-        .checklist-checkbox:checked {
-            background: var(--vscode-button-background, #0e639c);
-            border-color: var(--vscode-button-background, #0e639c);
-        }
-
-        .checklist-checkbox:checked::after {
-            content: '';
-            position: absolute;
-            left: 4px;
-            top: 1px;
-            width: 5px;
-            height: 9px;
-            border: solid var(--vscode-button-foreground, #ffffff);
-            border-width: 0 2px 2px 0;
-            transform: rotate(45deg);
-        }
-
-        .checklist-checkbox:focus {
-            outline: 1px solid var(--vscode-focusBorder, #007acc);
-            outline-offset: 1px;
-        }
-
-        /* Work item type icon - 12x12px */
-        .checklist-icon {
-            flex-shrink: 0;
-            display: flex;
-            align-items: center;
-            width: 12px;
-            height: 12px;
-        }
-
-        .checklist-icon svg {
-            width: 12px;
-            height: 12px;
-        }
-
-        /* Avatar - 18x18px, appears AFTER icon, BEFORE title - uses same colors as card avatars */
-        .checklist-avatar {
-            flex-shrink: 0;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 8px;
-            font-weight: 600;
-            letter-spacing: -0.5px;
-            /* Color will be set dynamically by applyAvatarColors() function */
-        }
-
-        .checklist-avatar.unassigned {
-            background-color: var(--vscode-input-background);
-            color: #ffffff;
-            border: 1px solid var(--vscode-input-border);
-        }
-
-        /* Title - clickable, underlined, flex fills remaining space */
-        .checklist-title {
-            flex: 1;
-            font-size: 13px;
-            color: #ffffff;
-            cursor: pointer;
-            user-select: none;
-            text-decoration: underline;
-            line-height: 1.4;
-            font-weight: 400;
-        }
-
-        .checklist-title:hover {
-            color: #ffffff;
-        }
-
-        .checklist-title.done {
-            color: #ffffff;
-        }
-
-        .card-effort-toggle {
-            background: transparent;
-            border: 1px solid var(--vscode-input-border);
-            color: #ffffff;
-            cursor: pointer;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            transition: all 0.2s;
-            width: 100%;
-            justify-content: center;
-        }
-
-        .card-effort-toggle:hover {
-            background: var(--vscode-list-hoverBackground);
-            border-color: var(--vscode-focusBorder);
-        }
-
-        .effort-icon {
-            font-size: 10px;
-            opacity: 0.7;
-        }
-
-        .effort-value {
-            font-weight: 500;
-        }
-
-        /* Card Menu Dropdown */
-        .card-menu {
-            position: fixed;
-            min-width: 180px;
-            background: var(--vscode-menu-background);
-            border: 1px solid var(--vscode-menu-border);
-            border-radius: 6px;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-            z-index: 1000;
-            padding: 4px 0;
-            opacity: 0;
-            transform: translateY(-10px);
-            pointer-events: none;
-            transition: opacity 0.2s ease, transform 0.2s ease;
-        }
-
-        .card-menu.show {
-            opacity: 1;
-            transform: translateY(0);
-            pointer-events: auto;
-        }
-
-        .card-menu-item {
-            padding: 8px 16px;
-            cursor: pointer;
-            font-size: 13px;
-            color: var(--vscode-menu-foreground);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            transition: all 0.2s;
-        }
-
-        .card-menu-item .menu-icon {
-            width: 16px;
-            height: 16px;
-            flex-shrink: 0;
-            filter: brightness(0) saturate(100%) invert(var(--vscode-icon-foreground-opacity, 0.8));
-        }
-
-        .card-menu-item .menu-icon.test-icon {
-            width: 23px;
-            height: 23px;
-        }
-
-        .card-menu-item:hover .menu-icon {
-            filter: brightness(0) saturate(100%) invert(1);
-        }
-
-        .card-menu-item:hover {
-            background: var(--vscode-menu-selectionBackground);
-            color: var(--vscode-menu-selectionForeground);
-        }
-
-        .card-menu-item.danger:hover {
-            background: rgba(209, 52, 56, 0.2);
-            color: #d13438;
-        }
-
-        .card-menu-separator {
-            height: 1px;
-            background: var(--vscode-menu-separatorBackground);
-            margin: 4px 0;
-        }
-
-        /* Context Menu */
-        .context-menu {
-            display: none;
-            position: fixed;
-            min-width: 180px;
-            background: var(--vscode-menu-background);
-            border: 1px solid var(--vscode-menu-border);
-            border-radius: 6px;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-            z-index: 1000;
-            padding: 4px 0;
-        }
-
-        .context-menu.show {
-            display: block;
-        }
-
-        .context-menu-item {
-            padding: 8px 16px;
-            cursor: pointer;
-            font-size: 13px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: var(--vscode-menu-foreground);
-            transition: background 0.1s;
-        }
-
-        .context-menu-item:hover {
-            background: var(--vscode-menu-selectionBackground);
-            color: var(--vscode-menu-selectionForeground);
-        }
-
-        .context-menu-item .icon {
-            width: 16px;
-            text-align: center;
-        }
-
-        .context-menu-separator {
-            height: 1px;
-            background: var(--vscode-menu-separatorBackground);
-            margin: 4px 0;
-        }
-
-        .context-menu-submenu {
-            position: relative;
-        }
-
-        .context-menu-submenu::after {
-            content: '▶';
-            font-size: 10px;
-            margin-left: auto;
-        }
-
-        .submenu {
-            display: none;
-            position: absolute;
-            left: 100%;
-            top: 0;
-            min-width: 150px;
-            background: var(--vscode-menu-background);
-            border: 1px solid var(--vscode-menu-border);
-            border-radius: 6px;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-            padding: 4px 0;
-        }
-
-        .context-menu-submenu:hover .submenu {
-            display: block;
-        }
-
-        /* Add New Item Input */
-        .add-item-input {
-            width: 100%;
-            padding: 8px;
-            background: var(--vscode-input-background);
-            color: var(--vscode-input-foreground);
-            border: 1px solid var(--vscode-input-border);
-            border-radius: 4px;
-            font-size: 13px;
-            margin-bottom: 8px;
-        }
-
-        .add-item-input:focus {
-            outline: none;
-            border-color: var(--vscode-focusBorder);
-        }
-
-        .add-item-actions {
-            display: flex;
-            gap: 8px;
-        }
-
-        /* Toast */
-        .toast {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            padding: 12px 20px;
-            background: var(--vscode-notifications-background);
-            border: 1px solid var(--vscode-notifications-border);
-            border-radius: 6px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-            z-index: 1000;
-            display: none;
-            animation: slideIn 0.2s ease;
-        }
-
-        .toast.show {
-            display: block;
-        }
-
-        .toast.success {
-            border-left: 4px solid #10b981;
-        }
-
-        .toast.error {
-            border-left: 4px solid #ef4444;
-        }
-
-        @keyframes slideIn {
-            from {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-
-        /* Keyboard Help */
-        .keyboard-help {
-            position: fixed;
-            bottom: 20px;
-            left: 20px;
-            padding: 8px 12px;
-            background: var(--vscode-notifications-background);
-            border: 1px solid var(--vscode-notifications-border);
-            border-radius: 6px;
-            font-size: 11px;
-            color: var(--vscode-descriptionForeground);
-            display: none;
-        }
-
-        .keyboard-help.show {
-            display: block;
-        }
-
-        .keyboard-help kbd {
-            background: var(--vscode-button-secondaryBackground);
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-family: monospace;
-            margin: 0 2px;
-        }
-
-        /* Empty Column */
-        .empty-column {
-            text-align: center;
-            padding: 20px;
-            color: var(--vscode-descriptionForeground);
-            font-size: 12px;
-        }
-
-        /* Filter Bar */
-        .filter-bar {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 10px 20px;
-            background: var(--vscode-sideBar-background);
-            border-bottom: 1px solid var(--vscode-panel-border);
-            flex-wrap: wrap;
-        }
-
-        .filter-bar.collapsed {
-            display: none;
-        }
-
-        .filter-search {
-            flex: 1;
-            min-width: 200px;
-            max-width: 300px;
-            position: relative;
-        }
-
-        .filter-search-input {
-            width: 100%;
-            padding: 6px 32px 6px 10px;
-            background: var(--vscode-input-background);
-            color: var(--vscode-input-foreground);
-            border: 1px solid var(--vscode-input-border);
-            border-radius: 4px;
-            font-size: 12px;
-        }
-
-        .filter-search-input:focus {
-            outline: none;
-            border-color: var(--vscode-focusBorder);
-        }
-
-        .filter-search-input::placeholder {
-            color: var(--vscode-input-placeholderForeground);
-        }
-
-        .filter-search-clear {
-            position: absolute;
-            right: 8px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: transparent;
-            border: none;
-            color: var(--vscode-descriptionForeground);
-            cursor: pointer;
-            font-size: 14px;
-            display: none;
-        }
-
-        .filter-search-input:not(:placeholder-shown) + .filter-search-clear {
-            display: block;
-        }
-
-        .filter-clear-btn {
-            width: 100%;
-            padding: 6px 12px;
-            background: transparent;
-            border: none;
-            color: var(--vscode-descriptionForeground);
-            font-size: 12px;
-            cursor: pointer;
-            text-align: right;
-            transition: all 0.15s;
-        }
-
-        .filter-clear-btn:not(:disabled) {
-            color: var(--vscode-foreground);
-        }
-
-        .filter-clear-btn:not(:disabled):hover {
-            background: var(--vscode-list-hoverBackground);
-        }
-
-        .filter-clear-btn:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-
-        .filter-select {
-            padding: 5px 24px 5px 8px;
-            background: var(--vscode-dropdown-background);
-            color: var(--vscode-dropdown-foreground);
-            border: 1px solid var(--vscode-dropdown-border);
-            border-radius: 4px;
-            font-size: 12px;
-            cursor: pointer;
-            appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M3 5l3 3 3-3'/%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 6px center;
-        }
-
-        .filter-select:focus {
-            outline: none;
-            border-color: var(--vscode-focusBorder);
-        }
-
-        .filter-toggle {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 5px 10px;
-            background: transparent;
-            border: 1px solid var(--vscode-input-border);
-            border-radius: 4px;
-            color: var(--vscode-foreground);
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.15s;
-            flex-shrink: 0;
-        }
-
-        .filter-toggle:hover {
-            background: var(--vscode-list-hoverBackground);
-        }
-
-        .filter-toggle.active {
-            background: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
-            border-color: var(--vscode-button-background);
-        }
-
-        .filter-toggle-icon {
-            font-size: 14px;
-        }
-
-        .filter-divider {
-            width: 1px;
-            height: 24px;
-            background: var(--vscode-panel-border);
-        }
-
-        .filter-count {
-            font-size: 11px;
-            color: var(--vscode-descriptionForeground);
-            margin-left: auto;
-        }
-
-        .filter-count strong {
-            color: var(--vscode-foreground);
-        }
-
-        /* Hidden card when filtered */
-        .card.filtered-out {
-            display: none;
-        }
-
-        /* Column hidden indicator when all items filtered */
-        .column-filtered-info {
-            text-align: center;
-            padding: 16px;
-            color: var(--vscode-descriptionForeground);
-            font-size: 11px;
-            font-style: italic;
-        }
-
-        /* Filter Dropdown Styles */
-        .filter-dropdown {
-            position: relative;
-            flex-shrink: 0;
-        }
-
-        .filter-dropdown-btn {
-            padding: 5px 20px 5px 8px;
-            background: var(--vscode-dropdown-background);
-            color: var(--vscode-dropdown-foreground);
-            border: 1px solid var(--vscode-dropdown-border);
-            border-radius: 4px;
-            font-size: 12px;
-            cursor: pointer;
-            min-width: 100px;
-            width: auto;
-            text-align: left;
-            position: relative;
-            white-space: nowrap;
-            display: inline-block;
-            flex-shrink: 0;
-            transition: all 0.15s ease;
-        }
-
-        .filter-dropdown-btn:hover {
-            background: var(--vscode-list-hoverBackground);
-            border-color: var(--vscode-focusBorder);
-        }
-
-        .filter-dropdown-btn:active {
-            transform: scale(0.97);
-        }
-
-        .filter-dropdown-btn::after {
-            content: '\u276F';
-            position: absolute;
-            right: 4px;
-            top: 50%;
-            transform: translateY(-50%) rotate(90deg);
-            font-size: 10px;
-            opacity: 0.7;
-        }
-
-        /* Ensure iteration dropdown button never collapses */
-        #iterationDropdownBtn {
-            min-width: 100px !important;
-            width: auto !important;
-        }
-
-        .filter-dropdown-content {
-            display: none;
-            position: absolute;
-            top: 100%;
-            right: 0;
-            min-width: 200px;
-            max-height: 300px;
-            overflow-y: auto;
-            background: var(--vscode-dropdown-background);
-            border: 1px solid var(--vscode-dropdown-border);
-            border-radius: 4px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-            z-index: 1000;
-            margin-top: 4px;
-            padding: 4px 0;
-        }
-
-        .filter-dropdown-content.show {
-            display: block;
-        }
-
-        .filter-checkbox-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 12px;
-            cursor: pointer;
-            font-size: 12px;
-            color: var(--vscode-dropdown-foreground);
-            user-select: none;
-        }
-        
-        .filter-checkbox-item:hover {
-            background: var(--vscode-list-hoverBackground);
-        }
-
-        .filter-checkbox-item input[type="checkbox"] {
-            margin: 0;
-            cursor: pointer;
-            width: 16px;
-            height: 16px;
-            /* Custom checkbox styling for proper dark theme support */
-            -webkit-appearance: none;
-            -moz-appearance: none;
-            appearance: none;
-            border: 1.5px solid var(--vscode-foreground, #cccccc);
-            border-radius: 3px;
-            background: var(--vscode-checkbox-background, transparent);
-            position: relative;
-            vertical-align: middle;
-            flex-shrink: 0;
-        }
-
-        .filter-checkbox-item input[type="checkbox"]:hover {
-            border-color: var(--vscode-focusBorder, #007acc);
-        }
-
-        .filter-checkbox-item input[type="checkbox"]:checked {
-            background: var(--vscode-button-background, #0e639c);
-            border-color: var(--vscode-button-background, #0e639c);
-        }
-
-        .filter-checkbox-item input[type="checkbox"]:checked::after {
-            content: '';
-            position: absolute;
-            left: 4px;
-            top: 1px;
-            width: 5px;
-            height: 9px;
-            border: solid var(--vscode-button-foreground, #ffffff);
-            border-width: 0 2px 2px 0;
-            transform: rotate(45deg);
-        }
-
-        .filter-checkbox-item input[type="checkbox"]:focus {
-            outline: 1px solid var(--vscode-focusBorder, #007acc);
-            outline-offset: 1px;
-        }
-
-        /* Scrollbar Styling */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: var(--vscode-scrollbarSlider-background);
-            border-radius: 4px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: var(--vscode-scrollbarSlider-hoverBackground);
-        }
-    </style>
+    <link rel="stylesheet" href="${boardCssUri}">
 </head>
 <body>
     <div class="board-header">
         <div class="board-title">
             <div class="board-selector">
-                <button class="board-selector-btn" onclick="toggleBoardDropdown()">
+                <button class="board-selector-btn" data-click="toggleBoardDropdown">
                     <span class="board-icon">${this._getBoardIcon(this.boardName)}</span>
                     <span class="board-name">${this._escapeHtml(this.boardName)}</span>
                 </button>
                 <div class="board-dropdown" id="boardDropdown">
                     ${this.availableBoards.map(board => `
                         <div class="board-dropdown-item ${board.id === this.boardId ? 'active' : ''}"
-                             onclick="switchBoard(${jsArg(board.id)}, ${jsArg(board.name)})">
+                             data-click="switchBoard" data-click-args='[${jsArg(board.id)}, ${jsArg(board.name)}]'>
                             <span class="board-icon">${this._getBoardIcon(board.name)}</span>
                             <span class="board-name">${this._escapeHtml(board.name)}</span>
                         </div>
@@ -3823,16 +2277,16 @@ export class BoardPanel {
             </div>
         </div>
         <div class="board-actions">
-            <button class="btn icon-btn" onclick="toggleFilterBar()" title="Toggle filters (F)" id="filterToggleBtn">
+            <button class="btn icon-btn" data-click="toggleFilterBar" title="Toggle filters (F)" id="filterToggleBtn">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M6 10.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1-.5-.5zm-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5zm-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5z"/></svg>
             </button>
-            <button class="btn icon-btn" onclick="refresh()" title="Refresh (R)">
+            <button class="btn icon-btn" data-click="refresh" title="Refresh (R)">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/></svg>
             </button>
-            <button class="btn icon-btn" onclick="openInBrowser()" title="Open in browser">
+            <button class="btn icon-btn" data-click="openInBrowser" title="Open in browser">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5z"/><path fill-rule="evenodd" d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0v-5z"/></svg>
             </button>
-            <button class="btn icon-btn" onclick="toggleKeyboardHelp()" title="Keyboard shortcuts (?)">?</button>
+            <button class="btn icon-btn" data-click="toggleKeyboardHelp" title="Keyboard shortcuts (?)">?</button>
         </div>
     </div>
 
@@ -3843,90 +2297,90 @@ export class BoardPanel {
                    class="filter-search-input"
                    id="searchInput"
                    placeholder="Search by ID or title..."
-                   oninput="applyFilters()"
-                   onkeydown="if(event.key==='Escape'){this.value='';applyFilters();}">
-            <button class="filter-search-clear" onclick="clearSearch()">×</button>
+                   data-input="applyFilters"
+                   data-keydown="handleSearchKeydown" data-keydown-args='["$event", "$el"]'>
+            <button class="filter-search-clear" data-click="clearSearch">×</button>
         </div>
 
         <div class="filter-divider"></div>
 
         <div class="filter-dropdown" id="assigneeDropdown">
-            <button class="filter-dropdown-btn" id="assigneeDropdownBtn" onclick="toggleDropdown('assigneeDropdownContent')">Assigned to</button>
+            <button class="filter-dropdown-btn" id="assigneeDropdownBtn" data-click="toggleDropdown" data-click-args='["assigneeDropdownContent"]'>Assigned to</button>
             <div class="filter-dropdown-content" id="assigneeDropdownContent">
-                <label class="filter-checkbox-item"><input type="checkbox" name="assignee" value="me" onchange="handleFilterChange('assignee', this)"> @Me</label>
-                <label class="filter-checkbox-item"><input type="checkbox" name="assignee" value="unassigned" onchange="handleFilterChange('assignee', this)"> Unassigned</label>
+                <label class="filter-checkbox-item"><input type="checkbox" name="assignee" value="me" data-change="handleFilterChange" data-change-args='["assignee", "$el"]'> @Me</label>
+                <label class="filter-checkbox-item"><input type="checkbox" name="assignee" value="unassigned" data-change="handleFilterChange" data-change-args='["assignee", "$el"]'> Unassigned</label>
                 <div class="filter-divider" style="margin: 4px 0; height: 1px; width: 100%;"></div>
                 ${teamMembersWithWorkItems.map(m => `
                     <label class="filter-checkbox-item">
-                        <input type="checkbox" name="assignee" value="${this._escapeHtml(m.uniqueName)}" onchange="handleFilterChange('assignee', this)">
+                        <input type="checkbox" name="assignee" value="${this._escapeHtml(m.uniqueName)}" data-change="handleFilterChange" data-change-args='["assignee", "$el"]'>
                         ${this._escapeHtml(m.displayName)}
                     </label>
                 `).join('')}
                 <div class="filter-divider" style="margin: 4px 0; height: 1px; width: 100%;"></div>
-                <button class="filter-clear-btn" id="assigneeClearBtn" onclick="clearFilter('assignee')" disabled>✕ Clear</button>
+                <button class="filter-clear-btn" id="assigneeClearBtn" data-click="clearFilter" data-click-args='["assignee"]' disabled>✕ Clear</button>
             </div>
         </div>
 
         <div class="filter-dropdown" id="typeDropdown">
-            <button class="filter-dropdown-btn" id="typeDropdownBtn" onclick="toggleDropdown('typeDropdownContent')">Type</button>
+            <button class="filter-dropdown-btn" id="typeDropdownBtn" data-click="toggleDropdown" data-click-args='["typeDropdownContent"]'>Type</button>
             <div class="filter-dropdown-content" id="typeDropdownContent">
                 ${boardTypes.map(type => `
                     <label class="filter-checkbox-item">
-                        <input type="checkbox" name="type" value="${this._escapeHtml(type)}" onchange="handleFilterChange('type', this)">
+                        <input type="checkbox" name="type" value="${this._escapeHtml(type)}" data-change="handleFilterChange" data-change-args='["type", "$el"]'>
                         ${this._escapeHtml(type)}
                     </label>
                 `).join('')}
                 <div class="filter-divider" style="margin: 4px 0; height: 1px; width: 100%;"></div>
-                <button class="filter-clear-btn" id="typeClearBtn" onclick="clearFilter('type')" disabled>✕ Clear</button>
+                <button class="filter-clear-btn" id="typeClearBtn" data-click="clearFilter" data-click-args='["type"]' disabled>✕ Clear</button>
             </div>
         </div>
 
         <div class="filter-dropdown" id="priorityDropdown">
-            <button class="filter-dropdown-btn" id="priorityDropdownBtn" onclick="toggleDropdown('priorityDropdownContent')">Priority</button>
+            <button class="filter-dropdown-btn" id="priorityDropdownBtn" data-click="toggleDropdown" data-click-args='["priorityDropdownContent"]'>Priority</button>
             <div class="filter-dropdown-content" id="priorityDropdownContent">
                 ${boardPriorities.map(priority => `
                     <label class="filter-checkbox-item">
-                        <input type="checkbox" name="priority" value="${priority}" onchange="handleFilterChange('priority', this)">
+                        <input type="checkbox" name="priority" value="${priority}" data-change="handleFilterChange" data-change-args='["priority", "$el"]'>
                         ${priorityLabels[priority] || priority}
                     </label>
                 `).join('')}
                 <div class="filter-divider" style="margin: 4px 0; height: 1px; width: 100%;"></div>
-                <button class="filter-clear-btn" id="priorityClearBtn" onclick="clearFilter('priority')" disabled>✕ Clear</button>
+                <button class="filter-clear-btn" id="priorityClearBtn" data-click="clearFilter" data-click-args='["priority"]' disabled>✕ Clear</button>
             </div>
         </div>
 
         <div class="filter-dropdown" id="stateDropdown">
-            <button class="filter-dropdown-btn" id="stateDropdownBtn" onclick="toggleDropdown('stateDropdownContent')">States</button>
+            <button class="filter-dropdown-btn" id="stateDropdownBtn" data-click="toggleDropdown" data-click-args='["stateDropdownContent"]'>States</button>
             <div class="filter-dropdown-content" id="stateDropdownContent">
                 ${boardStates.map(state => `
                     <label class="filter-checkbox-item">
-                        <input type="checkbox" name="state" value="${this._escapeHtml(state)}" onchange="handleFilterChange('state', this)">
+                        <input type="checkbox" name="state" value="${this._escapeHtml(state)}" data-change="handleFilterChange" data-change-args='["state", "$el"]'>
                         ${this._escapeHtml(state)}
                     </label>
                 `).join('')}
                 <div class="filter-divider" style="margin: 4px 0; height: 1px; width: 100%;"></div>
-                <button class="filter-clear-btn" id="stateClearBtn" onclick="clearFilter('state')" disabled>✕ Clear</button>
+                <button class="filter-clear-btn" id="stateClearBtn" data-click="clearFilter" data-click-args='["state"]' disabled>✕ Clear</button>
             </div>
         </div>
 
         <div class="filter-dropdown" id="areaDropdown">
-            <button class="filter-dropdown-btn" id="areaDropdownBtn" onclick="toggleDropdown('areaDropdownContent')">Area</button>
+            <button class="filter-dropdown-btn" id="areaDropdownBtn" data-click="toggleDropdown" data-click-args='["areaDropdownContent"]'>Area</button>
             <div class="filter-dropdown-content" id="areaDropdownContent">
                 ${boardAreas.map(area => `
                     <label class="filter-checkbox-item">
-                        <input type="checkbox" name="area" value="${this._escapeHtml(area)}" onchange="handleFilterChange('area', this)">
+                        <input type="checkbox" name="area" value="${this._escapeHtml(area)}" data-change="handleFilterChange" data-change-args='["area", "$el"]'>
                         ${this._escapeHtml(area.split('\\').pop() || area)}
                     </label>
                 `).join('')}
                 <div class="filter-divider" style="margin: 4px 0; height: 1px; width: 100%;"></div>
-                <button class="filter-clear-btn" id="areaClearBtn" onclick="clearFilter('area')" disabled>✕ Clear</button>
+                <button class="filter-clear-btn" id="areaClearBtn" data-click="clearFilter" data-click-args='["area"]' disabled>✕ Clear</button>
             </div>
         </div>
 
         <div class="filter-dropdown" id="iterationDropdown" style="flex-shrink: 0;">
-            <button class="filter-dropdown-btn" id="iterationDropdownBtn" onclick="toggleDropdown('iterationDropdownContent')" style="min-width: 100px;">Iteration</button>
+            <button class="filter-dropdown-btn" id="iterationDropdownBtn" data-click="toggleDropdown" data-click-args='["iterationDropdownContent"]' style="min-width: 100px;">Iteration</button>
             <div class="filter-dropdown-content" id="iterationDropdownContent">
-                <label class="filter-checkbox-item"><input type="checkbox" name="iteration" value="@currentiteration" onchange="handleFilterChange('iteration', this)"> @CurrentIteration</label>
+                <label class="filter-checkbox-item"><input type="checkbox" name="iteration" value="@currentiteration" data-change="handleFilterChange" data-change-args='["iteration", "$el"]'> @CurrentIteration</label>
                 <div class="filter-divider" style="margin: 4px 0; height: 1px; width: 100%;"></div>
                 ${boardIterations.length > 0 ? boardIterations.map(iteration => {
                     // Remove organization and team prefix (first 2 segments)
@@ -3935,19 +2389,19 @@ export class BoardPanel {
                     const displayName = parts.length > 2 ? parts.slice(2).join('\\') : iteration;
                     return `
                     <label class="filter-checkbox-item">
-                        <input type="checkbox" name="iteration" value="${this._escapeHtml(iteration)}" onchange="handleFilterChange('iteration', this)">
+                        <input type="checkbox" name="iteration" value="${this._escapeHtml(iteration)}" data-change="handleFilterChange" data-change-args='["iteration", "$el"]'>
                         ${this._escapeHtml(displayName)}
                     </label>
                     `;
                 }).join('') : '<div style="padding: 8px; color: var(--vscode-descriptionForeground); font-size: 11px;">No iterations available</div>'}
                 <div class="filter-divider" style="margin: 4px 0; height: 1px; width: 100%;"></div>
-                <button class="filter-clear-btn" id="iterationClearBtn" onclick="clearFilter('iteration')" disabled>✕ Clear</button>
+                <button class="filter-clear-btn" id="iterationClearBtn" data-click="clearFilter" data-click-args='["iteration"]' disabled>✕ Clear</button>
             </div>
         </div>
 
         <div class="filter-divider"></div>
 
-        <button class="filter-toggle" id="hideDoneToggle" onclick="toggleHideDone()">
+        <button class="filter-toggle" id="hideDoneToggle" data-click="toggleHideDone">
             <span class="filter-toggle-icon">✓</span>
             Hide Done
         </button>
@@ -3976,17 +2430,17 @@ export class BoardPanel {
                  data-limit="${column.itemLimit}"
                  data-index="${colIndex}"
                  tabindex="0"
-                 ondragover="handleDragOver(event)"
-                 ondragleave="handleDragLeave(event)"
-                 ondrop="handleDrop(event)">
-                <div class="column-header" onclick="toggleColumn(this.parentElement)">
+                 data-dragover="handleDragOver" data-dragover-args='["$event"]'
+                 data-dragleave="handleDragLeave" data-dragleave-args='["$event"]'
+                 data-drop="handleDrop" data-drop-args='["$event"]'>
+                <div class="column-header" data-click="toggleColumn" data-click-args='["$parent"]'>
                     <div class="column-header-left">
-                        <button class="collapse-btn" onclick="event.stopPropagation(); toggleColumn(this.closest('.column'))">◀</button>
+                        <button class="collapse-btn" data-click="toggleColumn" data-click-args='["$column"]' data-stop>◀</button>
                         <span class="column-title">${this._escapeHtml(column.name)}</span>
                     </div>
                     <div class="column-header-right">
                         ${colIndex === 0 ? `
-                        <button class="add-item-header-btn" onclick="event.stopPropagation(); showAddForm(${jsArg(column.name)})" title="New item">
+                        <button class="add-item-header-btn" data-click="showAddForm" data-click-args='[${jsArg(column.name)}]' data-stop title="New item">
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/></svg>
                             New item
                         </button>
@@ -4000,13 +2454,13 @@ export class BoardPanel {
                 <div class="add-item-form-container" id="add-form-${this._escapeHtml(column.name).replace(/\s/g, '-')}">
                     <div class="add-item-row">
                         <div class="add-item-type-dropdown" id="add-item-type-dropdown">
-                            <button class="add-item-type-btn" id="add-item-type-btn" onclick="toggleTypeDropdown(event)" title="${this._escapeHtml(defaultWorkItemType)}">
+                            <button class="add-item-type-btn" id="add-item-type-btn" data-click="toggleTypeDropdown" data-click-args='["$event"]' title="${this._escapeHtml(defaultWorkItemType)}">
                                 <span class="type-icon">${this._getTypeIcon(defaultWorkItemType)}</span>
                                 <svg class="dropdown-arrow" width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M4 6l4 4 4-4z"/></svg>
                             </button>
                             <div class="add-item-type-menu" id="add-item-type-menu">
                                 ${allWorkItemTypes.map(type => `
-                                    <div class="type-menu-item ${type === defaultWorkItemType ? 'selected' : ''}" data-type="${this._escapeHtml(type)}" onclick="selectWorkItemType(${jsArg(type)})" title="${this._escapeHtml(type)}">
+                                    <div class="type-menu-item ${type === defaultWorkItemType ? 'selected' : ''}" data-type="${this._escapeHtml(type)}" data-click="selectWorkItemType" data-click-args='[${jsArg(type)}]' title="${this._escapeHtml(type)}">
                                         <span class="type-icon">${this._getTypeIcon(type)}</span>
                                     </div>
                                 `).join('')}
@@ -4014,8 +2468,8 @@ export class BoardPanel {
                         </div>
                         <input type="hidden" id="add-item-type-value" value="${this._escapeHtml(defaultWorkItemType)}" />
                         <input type="text" class="add-item-input" id="add-item-title-input" placeholder="Enter title..."
-                               onkeydown="handleAddKeydown(event, ${jsArg(column.name)})" />
-                        <button class="btn btn-primary add-item-submit" onclick="createItem(${jsArg(column.name)})">Add to top</button>
+                               data-keydown="handleAddKeydown" data-keydown-args='["$event", ${jsArg(column.name)}]' />
+                        <button class="btn btn-primary add-item-submit" data-click="createItem" data-click-args='[${jsArg(column.name)}]'>Add to top</button>
                     </div>
                 </div>
                 ` : ''}
@@ -4031,14 +2485,14 @@ export class BoardPanel {
 
     <!-- Context Menu -->
     <div class="context-menu" id="contextMenu">
-        <div class="context-menu-item" onclick="contextMenuAction('open')">
+        <div class="context-menu-item" data-click="contextMenuAction" data-click-args='["open"]'>
             <span class="icon">📄</span> Open Details
         </div>
-        <div class="context-menu-item" onclick="contextMenuAction('openBrowser')">
+        <div class="context-menu-item" data-click="contextMenuAction" data-click-args='["openBrowser"]'>
             <span class="icon">🌐</span> Open in Browser
         </div>
         <div class="context-menu-separator"></div>
-        <div class="context-menu-item" onclick="contextMenuAction('assignToMe')">
+        <div class="context-menu-item" data-click="contextMenuAction" data-click-args='["assignToMe"]'>
             <span class="icon">👤</span> Assign to Me
         </div>
         <div class="context-menu-item context-menu-submenu">
@@ -4046,54 +2500,54 @@ export class BoardPanel {
             <div class="submenu" id="stateSubmenu">
                 ${columns.map(col => {
                     const state = Object.values(col.stateMappings || {})[0] || col.name;
-                    return `<div class="context-menu-item" onclick="contextMenuAction('changeState', ${jsArg(String(state))})">${this._escapeHtml(String(state))}</div>`;
+                    return `<div class="context-menu-item" data-click="contextMenuAction" data-click-args='["changeState", ${jsArg(String(state))}]'>${this._escapeHtml(String(state))}</div>`;
                 }).join('')}
             </div>
         </div>
-        <div class="context-menu-item" onclick="contextMenuAction('addComment')">
+        <div class="context-menu-item" data-click="contextMenuAction" data-click-args='["addComment"]'>
             <span class="icon">💬</span> Add Comment
         </div>
         <div class="context-menu-separator"></div>
-        <div class="context-menu-item" onclick="contextMenuAction('createBranch')">
+        <div class="context-menu-item" data-click="contextMenuAction" data-click-args='["createBranch"]'>
             <span class="icon">🔀</span> Create Branch
         </div>
         <div class="context-menu-separator"></div>
-        <div class="context-menu-item" onclick="contextMenuAction('copyId')">
+        <div class="context-menu-item" data-click="contextMenuAction" data-click-args='["copyId"]'>
             <span class="icon">📋</span> Copy ID
         </div>
-        <div class="context-menu-item" onclick="contextMenuAction('copyUrl')">
+        <div class="context-menu-item" data-click="contextMenuAction" data-click-args='["copyUrl"]'>
             <span class="icon">🔗</span> Copy URL
         </div>
     </div>
 
     <!-- Card Menu -->
     <div class="card-menu" id="cardMenu">
-        <div class="card-menu-item" onclick="cardMenuAction('open')">
+        <div class="card-menu-item" data-click="cardMenuAction" data-click-args='["open"]'>
             <img src="https://img.icons8.com/pastel-glyph/128/external-link--v2.png" class="menu-icon" alt="open"> Open
         </div>
-        <div class="card-menu-item" onclick="cardMenuAction('editTitle')">
+        <div class="card-menu-item" data-click="cardMenuAction" data-click-args='["editTitle"]'>
             <img src="https://img.icons8.com/ios/50/edit--v1.png" class="menu-icon" alt="edit"> Edit title
         </div>
         <div class="card-menu-separator"></div>
-        <div class="card-menu-item" onclick="cardMenuAction('moveToColumn')">
+        <div class="card-menu-item" data-click="cardMenuAction" data-click-args='["moveToColumn"]'>
             <img src="https://img.icons8.com/ios/50/resize-horizontal.png" class="menu-icon" alt="move column"> Move to column
         </div>
-        <div class="card-menu-item" onclick="cardMenuAction('moveToIteration')">
+        <div class="card-menu-item" data-click="cardMenuAction" data-click-args='["moveToIteration"]'>
             <img src="https://img.icons8.com/ios/50/resize-horizontal.png" class="menu-icon" alt="move iteration"> Move to iteration
         </div>
         <div class="card-menu-separator"></div>
-        <div class="card-menu-item" onclick="cardMenuAction('addTask')">
+        <div class="card-menu-item" data-click="cardMenuAction" data-click-args='["addTask"]'>
             <img src="https://img.icons8.com/ios/50/plus--v1.png" class="menu-icon" alt="add task"> Add Task
         </div>
-        <div class="card-menu-item" onclick="cardMenuAction('addTest')">
+        <div class="card-menu-item" data-click="cardMenuAction" data-click-args='["addTest"]'>
             <img src="https://img.icons8.com/carbon-copy/100/test-tube.png" class="menu-icon test-icon" alt="add test"> Add Test
         </div>
         <div class="card-menu-separator"></div>
-        <div class="card-menu-item" onclick="cardMenuAction('createBranch')">
+        <div class="card-menu-item" data-click="cardMenuAction" data-click-args='["createBranch"]'>
             <img src="https://img.icons8.com/ios/50/merge-git.png" class="menu-icon" alt="branch"> New branch...
         </div>
         <div class="card-menu-separator"></div>
-        <div class="card-menu-item danger" onclick="cardMenuAction('delete')">
+        <div class="card-menu-item danger" data-click="cardMenuAction" data-click-args='["delete"]'>
             <img src="https://img.icons8.com/ios/50/trash--v1.png" class="menu-icon" alt="delete"> Delete
         </div>
     </div>
@@ -4113,1502 +2567,9 @@ export class BoardPanel {
 
     <div class="toast" id="toast"></div>
 
-    <script>
-        const vscode = acquireVsCodeApi();
-        const availableBoards = ${boardsJson};
-        let draggedCard = null;
-        let originalColumn = null;
-        let selectedCard = null;
-        let keyboardMoveMode = false;
-        let contextMenuWorkItemId = null;
-
-        // Avatar color utility - generates consistent colors based on display name
-        function getAvatarColor(displayName) {
-            if (!displayName || displayName === 'Unassigned') {
-                return { bg: 'rgba(139, 139, 139, 0.3)', fg: '#8b8b8b' };
-            }
-
-            // Hash the display name to get a consistent number
-            let hash = 0;
-            for (let i = 0; i < displayName.length; i++) {
-                hash = displayName.charCodeAt(i) + ((hash << 5) - hash);
-            }
-
-            // Predefined pleasant color palette
-            const colors = [
-                { bg: 'rgba(34, 197, 94, 0.3)', fg: '#22c55e' },   // Green
-                { bg: 'rgba(59, 130, 246, 0.3)', fg: '#3b82f6' },  // Blue
-                { bg: 'rgba(168, 85, 247, 0.3)', fg: '#a855f7' },  // Purple
-                { bg: 'rgba(236, 72, 153, 0.3)', fg: '#ec4899' },  // Pink
-                { bg: 'rgba(251, 146, 60, 0.3)', fg: '#fb923c' },  // Orange
-                { bg: 'rgba(14, 165, 233, 0.3)', fg: '#0ea5e9' },  // Cyan
-                { bg: 'rgba(244, 63, 94, 0.3)', fg: '#f43f5e' },   // Red
-                { bg: 'rgba(234, 179, 8, 0.3)', fg: '#eab308' },   // Yellow
-                { bg: 'rgba(20, 184, 166, 0.3)', fg: '#14b8a6' },  // Teal
-                { bg: 'rgba(139, 92, 246, 0.3)', fg: '#8b5cf6' },  // Violet
-            ];
-
-            const index = Math.abs(hash) % colors.length;
-            return colors[index];
-        }
-
-        // Apply avatar colors after DOM is loaded
-        function applyAvatarColors() {
-            document.querySelectorAll('.card-avatar').forEach(avatar => {
-                // Check if it's a main card avatar or a checklist avatar
-                const card = avatar.closest('.card');
-                const checklistItem = avatar.closest('.checklist-item');
-
-                let displayName = '';
-                if (card) {
-                    displayName = card.getAttribute('data-assignee-name');
-                } else if (checklistItem) {
-                    displayName = checklistItem.getAttribute('data-assignee-name');
-                }
-
-                if (!avatar.classList.contains('unassigned') && displayName) {
-                    const color = getAvatarColor(displayName);
-                    avatar.style.background = color.bg;
-                    avatar.style.color = color.fg;
-                }
-            });
-        }
-
-        // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
-            document.addEventListener('keydown', handleGlobalKeydown);
-            document.addEventListener('click', hideContextMenu);
-            applyAvatarColors();
-        });
-
-        // Keyboard Navigation
-        function handleGlobalKeydown(event) {
-            // Ignore if typing in input
-            if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-                return;
-            }
-
-            switch (event.key) {
-                case '?':
-                    toggleKeyboardHelp();
-                    break;
-                case 'r':
-                case 'R':
-                    if (!event.ctrlKey && !event.metaKey) {
-                        refresh();
-                    }
-                    break;
-                case 'Escape':
-                    if (keyboardMoveMode) {
-                        cancelKeyboardMove();
-                    }
-                    hideContextMenu();
-                    break;
-                case 'm':
-                case 'M':
-                    if (selectedCard && !keyboardMoveMode) {
-                        startKeyboardMove();
-                    }
-                    break;
-                case 'Enter':
-                    if (keyboardMoveMode) {
-                        confirmKeyboardMove();
-                    } else if (selectedCard) {
-                        openWorkItem(parseInt(selectedCard.dataset.id));
-                    }
-                    break;
-                case 'ArrowUp':
-                    event.preventDefault();
-                    navigateCards(-1);
-                    break;
-                case 'ArrowDown':
-                    event.preventDefault();
-                    navigateCards(1);
-                    break;
-                case 'ArrowLeft':
-                    event.preventDefault();
-                    if (keyboardMoveMode) {
-                        moveCardToColumn(-1);
-                    } else {
-                        navigateColumns(-1);
-                    }
-                    break;
-                case 'ArrowRight':
-                    event.preventDefault();
-                    if (keyboardMoveMode) {
-                        moveCardToColumn(1);
-                    } else {
-                        navigateColumns(1);
-                    }
-                    break;
-            }
-        }
-
-        function selectCard(card) {
-            if (selectedCard) {
-                selectedCard.classList.remove('selected');
-            }
-            selectedCard = card;
-            if (card) {
-                card.classList.add('selected');
-                card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
-        }
-
-        function navigateCards(direction) {
-            const cards = Array.from(document.querySelectorAll('.card'));
-            if (cards.length === 0) return;
-
-            if (!selectedCard) {
-                selectCard(cards[0]);
-                return;
-            }
-
-            const currentIndex = cards.indexOf(selectedCard);
-            const newIndex = Math.max(0, Math.min(cards.length - 1, currentIndex + direction));
-            selectCard(cards[newIndex]);
-        }
-
-        function navigateColumns(direction) {
-            const columns = Array.from(document.querySelectorAll('.column:not(.collapsed)'));
-            if (columns.length === 0) return;
-
-            let currentColIndex = 0;
-            if (selectedCard) {
-                const currentColumn = selectedCard.closest('.column');
-                currentColIndex = columns.indexOf(currentColumn);
-            }
-
-            const newColIndex = Math.max(0, Math.min(columns.length - 1, currentColIndex + direction));
-            const targetColumn = columns[newColIndex];
-            const cards = targetColumn.querySelectorAll('.card');
-
-            if (cards.length > 0) {
-                selectCard(cards[0]);
-            } else {
-                // Focus empty column
-                columns.forEach(c => c.classList.remove('keyboard-focus'));
-                targetColumn.classList.add('keyboard-focus');
-            }
-        }
-
-        function startKeyboardMove() {
-            if (!selectedCard) return;
-            keyboardMoveMode = true;
-            selectedCard.classList.add('keyboard-moving');
-            showToast('Move mode: Use ← → to move, Enter to confirm, Esc to cancel', 'info');
-        }
-
-        function cancelKeyboardMove() {
-            keyboardMoveMode = false;
-            if (selectedCard) {
-                selectedCard.classList.remove('keyboard-moving');
-            }
-            showToast('Move cancelled', 'info');
-        }
-
-        function moveCardToColumn(direction) {
-            if (!selectedCard) return;
-
-            const columns = Array.from(document.querySelectorAll('.column:not(.collapsed)'));
-            const currentColumn = selectedCard.closest('.column');
-            const currentColIndex = columns.indexOf(currentColumn);
-            const newColIndex = Math.max(0, Math.min(columns.length - 1, currentColIndex + direction));
-
-            if (newColIndex === currentColIndex) return;
-
-            const targetColumn = columns[newColIndex];
-            const limit = parseInt(targetColumn.dataset.limit) || 0;
-
-            if (limit > 0) {
-                // Only count visible cards (not filtered out)
-                const currentCount = targetColumn.querySelectorAll('.card:not(.filtered-out)').length;
-
-                // Debug logging
-                const allCards = targetColumn.querySelectorAll('.card').length;
-                const filteredCards = targetColumn.querySelectorAll('.card.filtered-out').length;
-                console.log('[WIP Check] Column:', targetColumn.dataset.column,
-                    'Limit:', limit,
-                    'Visible cards:', currentCount,
-                    'Total cards:', allCards,
-                    'Filtered cards:', filteredCards);
-
-                if (currentCount >= limit) {
-                    showToast('WIP limit reached for ' + targetColumn.dataset.column + ' (' + currentCount + '/' + limit + ')', 'error');
-                    return;
-                }
-            }
-
-            // Move the card visually
-            const columnBody = targetColumn.querySelector('.column-body');
-            const placeholder = columnBody.querySelector('.drop-placeholder');
-            columnBody.insertBefore(selectedCard, placeholder);
-
-            // Remove empty state message if present
-            const emptyMessage = columnBody.querySelector('.empty-column');
-            if (emptyMessage) {
-                emptyMessage.remove();
-            }
-
-            updateColumnCounts();
-        }
-
-        function confirmKeyboardMove() {
-            if (!selectedCard || !keyboardMoveMode) return;
-
-            const column = selectedCard.closest('.column');
-            const workItemId = parseInt(selectedCard.dataset.id);
-            const targetColumn = column.dataset.column;
-
-            // Look up the correct state based on the work item type
-            const workItemType = selectedCard.dataset.type;
-            let targetState = column.dataset.state; // fallback
-
-            try {
-                const stateMappings = JSON.parse(column.dataset.stateMappings || '{}');
-                if (stateMappings[workItemType]) {
-                    targetState = stateMappings[workItemType];
-                }
-            } catch (e) {
-                console.error('Failed to parse state mappings:', e);
-            }
-
-            vscode.postMessage({
-                command: 'moveWorkItem',
-                workItemId: workItemId,
-                targetColumn: targetColumn,
-                targetState: targetState
-            });
-
-            keyboardMoveMode = false;
-            selectedCard.classList.remove('keyboard-moving');
-        }
-
-        // Context Menu
-        function showContextMenu(event, workItemId) {
-            event.preventDefault();
-            event.stopPropagation();
-
-            contextMenuWorkItemId = workItemId;
-            const menu = document.getElementById('contextMenu');
-
-            menu.style.left = event.pageX + 'px';
-            menu.style.top = event.pageY + 'px';
-            menu.classList.add('show');
-
-            // Adjust if menu goes off screen
-            const rect = menu.getBoundingClientRect();
-            if (rect.right > window.innerWidth) {
-                menu.style.left = (event.pageX - rect.width) + 'px';
-            }
-            if (rect.bottom > window.innerHeight) {
-                menu.style.top = (event.pageY - rect.height) + 'px';
-            }
-        }
-
-        function hideContextMenu() {
-            document.getElementById('contextMenu').classList.remove('show');
-            contextMenuWorkItemId = null;
-        }
-
-        function contextMenuAction(action, value) {
-            hideContextMenu();
-            if (!contextMenuWorkItemId) return;
-
-            switch (action) {
-                case 'open':
-                    vscode.postMessage({ command: 'openWorkItem', workItemId: contextMenuWorkItemId });
-                    break;
-                case 'openBrowser':
-                    vscode.postMessage({ command: 'openWorkItemInBrowser', workItemId: contextMenuWorkItemId });
-                    break;
-                case 'assignToMe':
-                    vscode.postMessage({ command: 'assignToMe', workItemId: contextMenuWorkItemId });
-                    break;
-                case 'changeState':
-                    vscode.postMessage({ command: 'changeState', workItemId: contextMenuWorkItemId, state: value });
-                    break;
-                case 'addComment':
-                    vscode.postMessage({ command: 'addComment', workItemId: contextMenuWorkItemId });
-                    break;
-                case 'createBranch':
-                    vscode.postMessage({ command: 'createBranch', workItemId: contextMenuWorkItemId });
-                    break;
-                case 'copyId':
-                    vscode.postMessage({ command: 'copyId', workItemId: contextMenuWorkItemId });
-                    break;
-                case 'copyUrl':
-                    vscode.postMessage({ command: 'copyUrl', workItemId: contextMenuWorkItemId });
-                    break;
-            }
-        }
-
-        // Board Dropdown
-        function toggleBoardDropdown() {
-            document.getElementById('boardDropdown').classList.toggle('show');
-        }
-
-        function switchBoard(boardId, boardName) {
-            document.getElementById('boardDropdown').classList.remove('show');
-            vscode.postMessage({ command: 'switchBoard', boardId, boardName });
-        }
-
-        // Column Collapse
-        function toggleColumn(column) {
-            column.classList.toggle('collapsed');
-            const btn = column.querySelector('.collapse-btn');
-            btn.textContent = column.classList.contains('collapsed') ? '▶' : '◀';
-        }
-
-        // Keyboard Help
-        function toggleKeyboardHelp() {
-            document.getElementById('keyboardHelp').classList.toggle('show');
-        }
-
-        // Drag and Drop
-        function handleDragStart(event, workItemId) {
-            // Use currentTarget to get the card element, not a child element
-            draggedCard = event.currentTarget;
-            const column = draggedCard.closest('.column');
-            if (column) {
-                originalColumn = column.dataset.column;
-            }
-            draggedCard.classList.add('dragging');
-            event.dataTransfer.effectAllowed = 'move';
-            event.dataTransfer.setData('text/plain', workItemId);
-        }
-
-        function handleDragEnd(event) {
-            if (event.currentTarget) {
-                event.currentTarget.classList.remove('dragging');
-            }
-            document.querySelectorAll('.column').forEach(col => {
-                col.classList.remove('drag-over');
-            });
-            draggedCard = null;
-            originalColumn = null;
-        }
-
-        function handleDragOver(event) {
-            event.preventDefault();
-            event.dataTransfer.dropEffect = 'move';
-            const column = event.target.closest('.column');
-            if (column && !column.classList.contains('collapsed')) {
-                column.classList.add('drag-over');
-            }
-        }
-
-        function handleDragLeave(event) {
-            const column = event.target.closest('.column');
-            if (column && !column.contains(event.relatedTarget)) {
-                column.classList.remove('drag-over');
-            }
-        }
-
-        function handleDrop(event) {
-            event.preventDefault();
-            const column = event.target.closest('.column');
-            if (!column || !draggedCard || column.classList.contains('collapsed')) return;
-
-            column.classList.remove('drag-over');
-
-            const workItemId = parseInt(event.dataTransfer.getData('text/plain'));
-            const targetColumn = column.dataset.column;
-
-            // Look up the correct state based on the work item type being dragged
-            const workItemType = draggedCard.dataset.type;
-            let targetState = column.dataset.state; // fallback
-
-            console.log('[Drag] Work item type:', workItemType);
-            console.log('[Drag] Target column:', targetColumn);
-            console.log('[Drag] Fallback state:', targetState);
-
-            try {
-                const stateMappings = JSON.parse(column.dataset.stateMappings || '{}');
-                console.log('[Drag] State mappings for column:', stateMappings);
-
-                if (stateMappings[workItemType]) {
-                    targetState = stateMappings[workItemType];
-                    console.log('[Drag] Found state for type:', targetState);
-                } else {
-                    console.warn('[Drag] No state mapping found for type:', workItemType, '- using fallback:', targetState);
-                    console.log('[Drag] Available types in mapping:', Object.keys(stateMappings));
-                }
-            } catch (e) {
-                console.error('[Drag] Failed to parse state mappings:', e);
-            }
-
-            console.log('[Drag] Final target state:', targetState);
-
-            if (originalColumn === targetColumn) {
-                return;
-            }
-
-            const limit = parseInt(column.dataset.limit) || 0;
-            if (limit > 0) {
-                // Count visible cards in target column (not filtered out), excluding the card being dragged
-                const cardsInColumn = column.querySelectorAll('.card:not(.filtered-out)');
-                let currentCount = 0;
-                cardsInColumn.forEach(card => {
-                    // Don't count the dragged card if it's already in this column
-                    if (card !== draggedCard) {
-                        currentCount++;
-                    }
-                });
-
-                console.log('[WIP Check - Keyboard] Column:', targetColumn,
-                    'Limit:', limit,
-                    'Visible cards (excluding dragged):', currentCount);
-
-                if (currentCount >= limit) {
-                    showToast('WIP limit reached for ' + targetColumn + ' (' + currentCount + '/' + limit + ')', 'error');
-                    return;
-                }
-            }
-
-            const columnBody = column.querySelector('.column-body');
-            const placeholder = columnBody.querySelector('.drop-placeholder');
-            columnBody.insertBefore(draggedCard, placeholder);
-            draggedCard.classList.remove('dragging');
-
-            // Remove empty state message if present
-            const emptyMessage = columnBody.querySelector('.empty-column');
-            if (emptyMessage) {
-                emptyMessage.remove();
-            }
-
-            // IMMEDIATELY update the card's state indicator for instant visual feedback
-            if (targetState && draggedCard) {
-                // Update the data-state attribute
-                draggedCard.dataset.state = targetState;
-
-                // Update the status label text
-                const statusLabel = draggedCard.querySelector('.status-label');
-                if (statusLabel) {
-                    statusLabel.textContent = targetState;
-                }
-
-                // Update the status dot class based on the new state
-                const statusDot = draggedCard.querySelector('.status-dot');
-                if (statusDot) {
-                    const stateLower = targetState.toLowerCase();
-                    let newStateClass = 'todo';
-                    if (stateLower.includes('done') || stateLower.includes('closed')) {
-                        newStateClass = 'done';
-                    } else if (stateLower.includes('active') || stateLower.includes('doing') || stateLower.includes('progress')) {
-                        newStateClass = 'doing';
-                    }
-
-                    // Remove all state classes and add the new one
-                    statusDot.classList.remove('done', 'doing', 'todo');
-                    statusDot.classList.add(newStateClass);
-                }
-            }
-
-            updateColumnCounts();
-
-            vscode.postMessage({
-                command: 'moveWorkItem',
-                workItemId: workItemId,
-                targetColumn: targetColumn,
-                targetState: targetState
-            });
-        }
-
-        function updateColumnCounts() {
-            document.querySelectorAll('.column').forEach(column => {
-                const count = column.querySelectorAll('.card').length;
-                const limit = parseInt(column.dataset.limit) || 0;
-                const badge = column.querySelector('.wip-badge');
-
-                badge.textContent = limit > 0 ? count + '/' + limit : count;
-                badge.classList.remove('warning', 'danger');
-
-                if (limit > 0) {
-                    if (count >= limit) {
-                        badge.classList.add('danger');
-                    } else if (count >= limit * 0.8) {
-                        badge.classList.add('warning');
-                    }
-                }
-            });
-        }
-
-        // Handle messages from extension
-        window.addEventListener('message', event => {
-            const message = event.data;
-            switch (message.command) {
-                case 'moveSuccess':
-                    showToast(message.message, 'success');
-                    break;
-                case 'moveFailed':
-                    showToast(message.message, 'error');
-                    vscode.postMessage({ command: 'refresh' });
-                    break;
-            }
-        });
-
-        // Card actions
-        function openWorkItem(workItemId) {
-            // Add pulse animation to the clicked card
-            const card = document.querySelector('.card[data-id="' + workItemId + '"]');
-            if (card) {
-                card.classList.add('clicking');
-                setTimeout(function() {
-                    card.classList.remove('clicking');
-                }, 200);
-            }
-
-            // Open the work item detail
-            vscode.postMessage({ command: 'openWorkItem', workItemId: workItemId });
-        }
-
-        function editCardTitle(titleElement, workItemId) {
-            const currentTitle = titleElement.textContent;
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'card-title-editable';
-            input.value = currentTitle;
-
-            titleElement.replaceWith(input);
-            input.focus();
-            input.select();
-
-            function saveTitle() {
-                const newTitle = input.value.trim();
-                if (newTitle && newTitle !== currentTitle) {
-                    vscode.postMessage({
-                        command: 'updateWorkItemTitle',
-                        workItemId: workItemId,
-                        title: newTitle
-                    });
-                    const span = document.createElement('span');
-                    span.className = 'card-title';
-                    span.textContent = newTitle;
-                    span.ondblclick = (e) => { e.stopPropagation(); editCardTitle(span, workItemId); };
-                    input.replaceWith(span);
-                } else {
-                    const span = document.createElement('span');
-                    span.className = 'card-title';
-                    span.textContent = currentTitle;
-                    span.ondblclick = (e) => { e.stopPropagation(); editCardTitle(span, workItemId); };
-                    input.replaceWith(span);
-                }
-            }
-
-            input.addEventListener('blur', saveTitle);
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    saveTitle();
-                } else if (e.key === 'Escape') {
-                    const span = document.createElement('span');
-                    span.className = 'card-title';
-                    span.textContent = currentTitle;
-                    span.ondblclick = (ev) => { ev.stopPropagation(); editCardTitle(span, workItemId); };
-                    input.replaceWith(span);
-                }
-            });
-        }
-
-        // Card Menu Functions
-        let currentCardMenuWorkItemId = null;
-
-        function showCardMenu(event, workItemId) {
-            const menu = document.getElementById('cardMenu');
-            currentCardMenuWorkItemId = workItemId;
-
-            menu.style.left = event.pageX + 'px';
-            menu.style.top = event.pageY + 'px';
-            menu.classList.add('show');
-
-            setTimeout(() => {
-                document.addEventListener('click', hideCardMenu);
-            }, 10);
-        }
-
-        function hideCardMenu() {
-            const menu = document.getElementById('cardMenu');
-            menu.classList.remove('show');
-            document.removeEventListener('click', hideCardMenu);
-        }
-
-        function cardMenuAction(action) {
-            hideCardMenu();
-            const workItemId = currentCardMenuWorkItemId;
-
-            switch(action) {
-                case 'open':
-                    openWorkItem(workItemId);
-                    break;
-                case 'editTitle':
-                    const card = document.querySelector(\`.card[data-id="\${workItemId}"]\`);
-                    const titleElement = card.querySelector('.card-title');
-                    editCardTitle(titleElement, workItemId);
-                    break;
-                case 'moveToColumn':
-                    vscode.postMessage({ command: 'moveToColumn', workItemId: workItemId });
-                    break;
-                case 'moveToIteration':
-                    vscode.postMessage({ command: 'moveToIteration', workItemId: workItemId });
-                    break;
-                case 'addTask':
-                    vscode.postMessage({ command: 'addChildWorkItem', workItemId: workItemId, workItemType: 'Task' });
-                    break;
-                case 'addTest':
-                    vscode.postMessage({ command: 'addChildWorkItem', workItemId: workItemId, workItemType: 'Test Case' });
-                    break;
-                case 'createBranch':
-                    vscode.postMessage({ command: 'createBranch', workItemId: workItemId });
-                    break;
-                case 'delete':
-                    vscode.postMessage({ command: 'confirmDeleteWorkItem', workItemId: workItemId });
-                    break;
-            }
-        }
-
-        // Assignee Editor
-        function changeCardAssignee(workItemId, currentAssignee) {
-            vscode.postMessage({ command: 'changeAssignee', workItemId: workItemId, currentAssignee: currentAssignee });
-        }
-
-        // Effort/Story Points Editor
-        function toggleEffortEditor(button, workItemId) {
-            const card = button.closest('.card');
-            const currentEffort = card.dataset.effort || '';
-
-            const input = document.createElement('input');
-            input.type = 'number';
-            input.className = 'card-title-editable';
-            input.value = currentEffort;
-            input.style.width = '100%';
-            input.style.textAlign = 'center';
-            input.placeholder = 'Enter points';
-
-            button.replaceWith(input);
-            input.focus();
-            input.select();
-
-            function saveEffort() {
-                const newEffort = input.value.trim();
-                vscode.postMessage({
-                    command: 'updateWorkItemEffort',
-                    workItemId: workItemId,
-                    effort: newEffort ? parseFloat(newEffort) : null
-                });
-
-                const newButton = document.createElement('button');
-                newButton.className = 'card-effort-toggle';
-                newButton.onclick = (e) => { e.stopPropagation(); toggleEffortEditor(newButton, workItemId); };
-                newButton.title = 'Story Points';
-                newButton.innerHTML = \`<span class="effort-icon">▲</span><span class="effort-value">\${newEffort || 'Story Points'}</span>\`;
-                input.replaceWith(newButton);
-
-                card.dataset.effort = newEffort;
-            }
-
-            input.addEventListener('blur', saveEffort);
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    saveEffort();
-                } else if (e.key === 'Escape') {
-                    const newButton = document.createElement('button');
-                    newButton.className = 'card-effort-toggle';
-                    newButton.onclick = (ev) => { ev.stopPropagation(); toggleEffortEditor(newButton, workItemId); };
-                    newButton.title = 'Story Points';
-                    newButton.innerHTML = \`<span class="effort-icon">▲</span><span class="effort-value">\${currentEffort || 'Story Points'}</span>\`;
-                    input.replaceWith(newButton);
-                }
-            });
-        }
-
-        // Card Effort Editor (for effort display in card)
-        function editCardEffort(valueSpan, workItemId, currentEffort) {
-            const input = document.createElement('input');
-            input.type = 'number';
-            input.className = 'card-effort-input';
-            input.value = currentEffort || '';
-            input.min = '0';
-            input.step = '0.5';
-
-            valueSpan.replaceWith(input);
-            input.focus();
-            input.select();
-
-            // Prevent clicks on the input (including spinner arrows) from bubbling to card
-            input.addEventListener('click', (e) => {
-                e.stopPropagation();
-            });
-
-            // Prevent mousedown on spinner arrows from bubbling
-            input.addEventListener('mousedown', (e) => {
-                e.stopPropagation();
-            });
-
-            function saveEffort() {
-                const newEffort = input.value.trim();
-                const card = input.closest('.card');
-
-                vscode.postMessage({
-                    command: 'updateWorkItemEffort',
-                    workItemId: workItemId,
-                    effort: newEffort ? parseFloat(newEffort) : null
-                });
-
-                const newSpan = document.createElement('span');
-                newSpan.className = 'card-effort-value';
-                newSpan.onclick = (e) => { e.stopPropagation(); editCardEffort(newSpan, workItemId, parseFloat(newEffort)); };
-                newSpan.textContent = newEffort || currentEffort;
-                input.replaceWith(newSpan);
-
-                if (card) {
-                    card.dataset.effort = newEffort;
-                }
-            }
-
-            input.addEventListener('blur', saveEffort);
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    saveEffort();
-                } else if (e.key === 'Escape') {
-                    const newSpan = document.createElement('span');
-                    newSpan.className = 'card-effort-value';
-                    newSpan.onclick = (ev) => { ev.stopPropagation(); editCardEffort(newSpan, workItemId, currentEffort); };
-                    newSpan.textContent = currentEffort;
-                    input.replaceWith(newSpan);
-                }
-            });
-        }
-
-        // Checklist functions
-        function toggleChildChecklist(parentWorkItemId, typeId) {
-            const checklistId = 'checklist-' + parentWorkItemId + '-' + typeId;
-            const checklist = document.getElementById(checklistId);
-
-            if (checklist) {
-                const isExpanded = checklist.classList.contains('expanded');
-
-                // Close all other checklists for this parent
-                const allChecklists = document.querySelectorAll('[id^="checklist-' + parentWorkItemId + '-"]');
-                allChecklists.forEach(function(cl) {
-                    if (cl.id !== checklistId) {
-                        cl.classList.remove('expanded');
-                    }
-                });
-
-                if (isExpanded) {
-                    // Collapse this checklist
-                    checklist.classList.remove('expanded');
-                } else {
-                    // Expand this checklist
-                    checklist.classList.add('expanded');
-                    // Apply avatar colors to newly visible avatars
-                    setTimeout(function() {
-                        applyAvatarColors();
-                    }, 50);
-                }
-            }
-        }
-
-        function toggleChildState(childWorkItemId, parentWorkItemId, isChecked) {
-            // Update the visual state immediately
-            const checklistItem = document.querySelector('.checklist-item input[data-child-id="' + childWorkItemId + '"]')?.closest('.checklist-item');
-            const titleElement = checklistItem?.querySelector('.checklist-title');
-
-            if (checklistItem && titleElement) {
-                if (isChecked) {
-                    checklistItem.classList.add('done');
-                    titleElement.classList.add('done');
-                } else {
-                    checklistItem.classList.remove('done');
-                    titleElement.classList.remove('done');
-                }
-            }
-
-            // Send command to update work item state
-            const newState = isChecked ? 'Closed' : 'Active';
-            vscode.postMessage({
-                command: 'updateChildWorkItemState',
-                workItemId: childWorkItemId,
-                parentWorkItemId: parentWorkItemId,
-                state: newState,
-                isChecked: isChecked
-            });
-        }
-
-        function addChildWorkItem(parentWorkItemId, childType) {
-            vscode.postMessage({
-                command: 'addChildWorkItem',
-                parentWorkItemId: parentWorkItemId,
-                childType: childType
-            });
-        }
-
-        function assignToMe(workItemId, event) {
-            event.stopPropagation();
-            vscode.postMessage({ command: 'assignToMe', workItemId: workItemId });
-        }
-
-        // Board actions
-        function refresh() {
-            vscode.postMessage({ command: 'refresh' });
-        }
-
-        function openInBrowser() {
-            vscode.postMessage({ command: 'openInBrowser' });
-        }
-
-        // Add item form - toggle open/close
-        function showAddForm(columnName) {
-            const formId = 'add-form-' + columnName.replace(/\\s/g, '-');
-            const form = document.getElementById(formId);
-            if (form) {
-                if (form.classList.contains('active')) {
-                    // Close the form with slide animation
-                    form.classList.remove('active');
-                    const titleInput = document.getElementById('add-item-title-input');
-                    if (titleInput) titleInput.value = '';
-                    // Also close type dropdown if open
-                    const typeDropdown = document.getElementById('add-item-type-dropdown');
-                    if (typeDropdown) typeDropdown.classList.remove('open');
-                } else {
-                    // Open the form with slide animation
-                    form.classList.add('active');
-                    setTimeout(() => {
-                        const input = form.querySelector('.add-item-input');
-                        if (input) input.focus();
-                    }, 100);
-                }
-            }
-        }
-
-        function hideAddForm(columnName) {
-            const formId = 'add-form-' + columnName.replace(/\\s/g, '-');
-            const form = document.getElementById(formId);
-            if (form) {
-                form.classList.remove('active');
-                const titleInput = document.getElementById('add-item-title-input');
-                if (titleInput) titleInput.value = '';
-            }
-        }
-
-        function handleAddKeydown(event, columnName) {
-            if (event.key === 'Enter') {
-                createItem(columnName);
-            } else if (event.key === 'Escape') {
-                hideAddForm(columnName);
-            }
-        }
-
-        function createItem(columnName) {
-            const typeValue = document.getElementById('add-item-type-value');
-            const titleInput = document.getElementById('add-item-title-input');
-            const title = titleInput ? titleInput.value.trim() : '';
-            const workItemType = typeValue ? typeValue.value : 'User Story';
-
-            if (title) {
-                vscode.postMessage({
-                    command: 'createWorkItem',
-                    columnName: columnName,
-                    title: title,
-                    workItemType: workItemType
-                });
-                hideAddForm(columnName);
-            }
-        }
-
-        // Type dropdown functions
-        function toggleTypeDropdown(event) {
-            event.stopPropagation();
-            const dropdown = document.getElementById('add-item-type-dropdown');
-            if (dropdown) {
-                dropdown.classList.toggle('open');
-            }
-        }
-
-        function selectWorkItemType(type) {
-            const typeValue = document.getElementById('add-item-type-value');
-            const typeBtn = document.getElementById('add-item-type-btn');
-            const dropdown = document.getElementById('add-item-type-dropdown');
-            const menu = document.getElementById('add-item-type-menu');
-
-            if (typeValue) typeValue.value = type;
-            if (typeBtn) {
-                typeBtn.title = type;
-                const iconSpan = typeBtn.querySelector('.type-icon');
-                if (iconSpan) {
-                    iconSpan.innerHTML = getTypeIcon(type);
-                }
-            }
-
-            // Update selected state in menu
-            if (menu) {
-                menu.querySelectorAll('.type-menu-item').forEach(item => {
-                    item.classList.toggle('selected', item.dataset.type === type);
-                });
-            }
-
-            // Close dropdown
-            if (dropdown) dropdown.classList.remove('open');
-        }
-
-        function getTypeIcon(type) {
-            const icons = {
-                'User Story': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#4396C2" d="M320 352c-22.846 0-60.713 5.861-80 16.588V55.635C257.752 40.563 296.084 32 320 32h64v320h-64zm-192 32H32V64H0v352h208s-16-32-80-32zM64 32v320h64c22.848 0 60.707 5.865 80 16.594V55.635C190.244 40.561 151.902 32 128 32H64zm352 32v320h-96c-64 0-80 32-80 32h208V64h-32z" /></svg>',
-                'Product Backlog Item': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#4396C2" d="M320 352c-22.846 0-60.713 5.861-80 16.588V55.635C257.752 40.563 296.084 32 320 32h64v320h-64zm-192 32H32V64H0v352h208s-16-32-80-32zM64 32v320h64c22.848 0 60.707 5.865 80 16.594V55.635C190.244 40.561 151.902 32 128 32H64zm352 32v320h-96c-64 0-80 32-80 32h208V64h-32z" /></svg>',
-                'Requirement': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#4396C2" d="M320 352c-22.846 0-60.713 5.861-80 16.588V55.635C257.752 40.563 296.084 32 320 32h64v320h-64zm-192 32H32V64H0v352h208s-16-32-80-32zM64 32v320h64c22.848 0 60.707 5.865 80 16.594V55.635C190.244 40.561 151.902 32 128 32H64zm352 32v320h-96c-64 0-80 32-80 32h208V64h-32z" /></svg>',
-                'Feature': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#773B93" d="M145.619 384H128c-17.674 0-32 14.326-32 32v32h256v-32c0-17.674-14.327-32-32-32h-17.619c-7.434-36.47-39.75-64-78.381-64s-70.947 27.53-78.381 64zM224 352c20.832 0 38.425 13.418 45.053 32h-90.106c6.627-18.582 24.221-32 45.053-32zM352 64V32H96v32H32v80c0 40.051 29.686 73.018 68.153 78.8C114.003 278.531 163.984 320 224 320c60.016 0 109.997-41.469 123.846-97.2C386.313 217.018 416 184.051 416 144V64h-64zM96 189.053C77.417 182.426 64 164.832 64 144V96h32v93.053zM384 144c0 20.832-13.418 38.426-32 45.053V96h32v48z" /></svg>',
-                'Epic': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#FF8C00" d="M448 96c0 17.672-14.326 32-32 32v288H32V128c-17.674 0-32-14.328-32-32 0-17.674 14.326-32 32-32s32 14.326 32 32c0 11.191-6.094 20.564-14.797 26.283L136.727 256 216.79 94.543C202.699 91.191 192 79.113 192 64c0-17.674 14.326-32 32-32s32 14.326 32 32c0 15.113-10.699 27.191-24.789 30.543L311.273 256l87.523-133.717C390.094 116.564 384 107.191 384 96c0-17.674 14.326-32 32-32s32 14.326 32 32z" /></svg>',
-                'Bug': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#CC293D" d="M352 224c0-17.672 14.328-32 32-32h32v-32h-32c-8.828 0-16.938 2.797-23.656 7.516C350.391 140.234 324.078 120 293 120.781 287.016 108.297 275.547 99.828 262 96.781V64h32V32h-96v32h32v32.781c-13.547 3.047-25.016 11.516-31 24-31.078.781-57.391 21.016-67.344 48.297C125.938 163.797 117.828 161 109 161H77v32h32c17.672 0 32 14.328 32 32v32c0 17.672-14.328 32-32 32H77v32h32c8.828 0 16.938-2.797 23.656-7.516C142.609 340.766 168.922 361 200 360.219c5.984 12.484 17.453 20.953 31 24V417h-32v32h96v-32h-32v-32.781c13.547-3.047 25.016-11.516 31-24 31.078-.781 57.391-21.016 67.344-48.297C366.062 317.203 374.172 320 383 320h32v-32h-32c-17.672 0-32-14.328-32-32v-32zm-80 48c-26.469 0-48-21.531-48-48s21.531-48 48-48 48 21.531 48 48-21.531 48-48 48z" /></svg>',
-                'Task': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#FFC107" d="M320 64h-32c0-35.297-28.703-64-64-64s-64 28.703-64 64H64v384h320V64h-64zM128 96h64V64c0-17.641 14.359-32 32-32s32 14.359 32 32v32h64v32H128V96zm56 287.758l-79.844-79.828 31.688-31.688L184 320.414l128.156-128.172 31.688 31.688L184 383.758z" /></svg>',
-                'Issue': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#28A745" d="M320 64h-32c0-35.297-28.703-64-64-64s-64 28.703-64 64H64v384h320V64h-64zm-71.469 352h-49.063v-49.094h49.063V416zm0-84.109h-49.063V164.109h49.063v167.782zM320 128H128V96h64V64c0-17.643 14.357-32 32-32 17.641 0 32 14.357 32 32v32h64v32z" /></svg>',
-                'Impediment': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#E74C3C" d="M224 0C100.29 0 0 100.29 0 224s100.29 224 224 224 224-100.29 224-224S347.71 0 224 0zm0 416c-105.87 0-192-86.13-192-192S118.13 32 224 32s192 86.13 192 192-86.13 192-192 192zm96-240v64H128v-64h192z" /></svg>',
-                'Risk': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#F39C12" d="M224 0L0 448h448L224 0zm0 128l144 288H80L224 128zm-24 104v96h48v-96h-48zm0 128v48h48v-48h-48z" /></svg>',
-                'Change Request': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#3498DB" d="M384 224c0-17.672-14.328-32-32-32H256V96c0-17.672-14.328-32-32-32s-32 14.328-32 32v96H96c-17.672 0-32 14.328-32 32s14.328 32 32 32h96v96c0 17.672 14.328 32 32 32s32-14.328 32-32v-96h96c17.672 0 32-14.328 32-32z" /></svg>',
-                'Review': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#1ABC9C" d="M224 96c-106.039 0-192 85.961-192 192s85.961 192 192 192 192-85.961 192-192S330.039 96 224 96zm0 352c-88.366 0-160-71.634-160-160s71.634-160 160-160 160 71.634 160 160-71.634 160-160 160zm80-192c0 44.183-35.817 80-80 80s-80-35.817-80-80 35.817-80 80-80 80 35.817 80 80z" /></svg>',
-                'Test Case': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#9B59B6" d="M320 64h-32c0-35.297-28.703-64-64-64s-64 28.703-64 64H64v384h320V64h-64zM128 96h64V64c0-17.641 14.359-32 32-32s32 14.359 32 32v32h64v32H128V96zm192 320H128V192h192v224z" /></svg>',
-                'Test Plan': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#8E44AD" d="M384 0H64C28.65 0 0 28.65 0 64v320c0 35.35 28.65 64 64 64h320c35.35 0 64-28.65 64-64V64c0-35.35-28.65-64-64-64zm0 384H64V64h320v320zm-64-256H128v32h192v-32zm0 64H128v32h192v-32zm0 64H128v32h192v-32z" /></svg>',
-                'Test Suite': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#9B59B6" d="M416 32H32C14.336 32 0 46.336 0 64v320c0 17.664 14.336 32 32 32h384c17.664 0 32-14.336 32-32V64c0-17.664-14.336-32-32-32zm0 352H32V64h384v320zM128 160h192v32H128v-32zm0 64h192v32H128v-32zm0 64h128v32H128v-32z" /></svg>'
-            };
-            return icons[type] || '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 448" width="16" height="16"><path fill="#666666" d="M384 0H64C28.65 0 0 28.65 0 64v320c0 35.35 28.65 64 64 64h320c35.35 0 64-28.65 64-64V64c0-35.35-28.65-64-64-64zm32 384c0 17.64-14.36 32-32 32H64c-17.64 0-32-14.36-32-32V64c0-17.64 14.36-32 32-32h320c17.64 0 32 14.36 32 32v320z"/><rect x="96" y="96" width="256" height="32" fill="#666666"/><rect x="96" y="160" width="192" height="32" fill="#666666"/><rect x="96" y="224" width="224" height="32" fill="#666666"/></svg>';
-        }
-
-        // Toast notifications
-        function showToast(message, type) {
-            const toast = document.getElementById('toast');
-            toast.textContent = message;
-            toast.className = 'toast show ' + type;
-
-            setTimeout(() => {
-                toast.classList.remove('show');
-            }, 3000);
-        }
-
-        // Close dropdown when clicking outside
-        document.addEventListener('click', (event) => {
-            if (!event.target.closest('.board-selector')) {
-                const boardDropdown = document.getElementById('boardDropdown');
-                if (boardDropdown) boardDropdown.classList.remove('show');
-            }
-            if (!event.target.closest('.filter-dropdown')) {
-                document.querySelectorAll('.filter-dropdown-content').forEach(d => d.classList.remove('show'));
-            }
-            // Close type dropdown when clicking outside
-            if (!event.target.closest('.add-item-type-dropdown')) {
-                const typeDropdown = document.getElementById('add-item-type-dropdown');
-                if (typeDropdown) typeDropdown.classList.remove('open');
-            }
-            // Close add item form when clicking outside (but not on the add button)
-            if (!event.target.closest('.add-item-form-container') && !event.target.closest('.add-item-header-btn')) {
-                document.querySelectorAll('.add-item-form-container.active').forEach(form => {
-                    form.classList.remove('active');
-                    const titleInput = form.querySelector('.add-item-input');
-                    if (titleInput) titleInput.value = '';
-                });
-            }
-        });
-
-        function toggleDropdown(id) {
-            // Close all other dropdowns
-            document.querySelectorAll('.filter-dropdown-content').forEach(d => {
-                if (d.id !== id) d.classList.remove('show');
-            });
-            document.getElementById(id).classList.toggle('show');
-        }
-
-        function handleFilterChange(type, checkbox) {
-            const container = checkbox.closest('.filter-dropdown-content');
-            const checkboxes = container.querySelectorAll('input[type="checkbox"]');
-            
-            updateDropdownButton(type);
-            applyFilters();
-        }
-
-        function updateDropdownButton(type) {
-            const dropdownId = type + 'DropdownContent';
-            const btnId = type + 'DropdownBtn';
-            const clearBtnId = type + 'ClearBtn';
-            const container = document.getElementById(dropdownId);
-            const btn = document.getElementById(btnId);
-            const clearBtn = document.getElementById(clearBtnId);
-            const checkboxes = container.querySelectorAll('input[type="checkbox"]:checked');
-            
-            const labels = {
-                assignee: 'Assigned to',
-                type: 'Type',
-                priority: 'Priority',
-                state: 'States',
-                area: 'Area',
-                iteration: 'Iteration'
-            };
-            
-            if (checkboxes.length === 0) {
-                btn.textContent = labels[type];
-                if (clearBtn) clearBtn.disabled = true;
-            } else if (checkboxes.length === 1) {
-                const label = checkboxes[0].parentElement.textContent.trim();
-                btn.textContent = label;
-                if (clearBtn) clearBtn.disabled = false;
-            } else {
-                const firstLabel = checkboxes[0].parentElement.textContent.trim();
-                btn.textContent = firstLabel + ' (+' + (checkboxes.length - 1) + ')';
-                if (clearBtn) clearBtn.disabled = false;
-            }
-        }
-
-        function clearFilter(type) {
-            const dropdownId = type + 'DropdownContent';
-            const container = document.getElementById(dropdownId);
-            const checkboxes = container.querySelectorAll('input[type="checkbox"]');
-            checkboxes.forEach(cb => cb.checked = false);
-            updateDropdownButton(type);
-            applyFilters();
-        }
-
-        function getSelectedValues(type) {
-            const dropdownId = type + 'DropdownContent';
-            const container = document.getElementById(dropdownId);
-            const checkboxes = container.querySelectorAll('input[type="checkbox"]:checked');
-            return Array.from(checkboxes).map(cb => cb.value);
-        }
-
-        // ========== FILTER FUNCTIONALITY ==========
-        let currentUserEmail = ''; // Will be set when user info is available
-        let hideDoneActive = false; // Show all items by default
-        const currentIterationPath = ${serializeForScript(this._currentIterationPath || '')};
-
-        // Initialize filters on load
-        document.addEventListener('DOMContentLoaded', () => {
-            updateFilterCounts();
-            // Request current user info from extension
-            vscode.postMessage({ command: 'getCurrentUser' });
-        });
-
-        function toggleFilterBar() {
-            const filterBar = document.getElementById('filterBar');
-            const filterBtn = document.getElementById('filterToggleBtn');
-            filterBar.classList.toggle('collapsed');
-            filterBtn.classList.toggle('active', !filterBar.classList.contains('collapsed'));
-        }
-
-        function applyFilters() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase().trim();
-            const assigneeValues = getSelectedValues('assignee');
-            const typeValues = getSelectedValues('type');
-            const priorityValues = getSelectedValues('priority');
-            const stateValues = getSelectedValues('state');
-            const areaValues = getSelectedValues('area');
-            const iterationValues = getSelectedValues('iteration');
-
-            const assigneeAll = assigneeValues.length === 0;
-            const typeAll = typeValues.length === 0;
-            const priorityAll = priorityValues.length === 0;
-            const stateAll = stateValues.length === 0;
-            const areaAll = areaValues.length === 0;
-            const iterationAll = iterationValues.length === 0;
-
-            const cards = document.querySelectorAll('.card');
-            let visibleCount = 0;
-            let totalCount = cards.length;
-
-            cards.forEach(card => {
-                let visible = true;
-
-                // Search filter (ID or title)
-                if (searchTerm) {
-                    const cardId = card.dataset.id.toLowerCase();
-                    const cardTitle = card.dataset.title.toLowerCase();
-                    if (!cardId.includes(searchTerm) && !cardTitle.includes(searchTerm)) {
-                        visible = false;
-                    }
-                }
-
-                // Assignee filter
-                if (visible && !assigneeAll) {
-                    const assignee = card.dataset.assignee; // uniqueName
-                    let match = false;
-
-                    if (assigneeValues.includes('me')) {
-                         // Exact match comparison (case-insensitive)
-                         if (assignee && currentUserEmail) {
-                             // Log first 3 match attempts for debugging
-                             if (!window._meFilterLogCount) {
-                                 window._meFilterLogCount = 0;
-                             }
-                             if (window._meFilterLogCount < 3) {
-                                 vscode.postMessage({
-                                     command: 'debugLog',
-                                     text: '[@Me Filter] Current user uniqueName: "' + currentUserEmail + '"'
-                                 });
-                                 vscode.postMessage({
-                                     command: 'debugLog',
-                                     text: '[@Me Filter] Card assignee uniqueName: "' + assignee + '"'
-                                 });
-                                 vscode.postMessage({
-                                     command: 'debugLog',
-                                     text: '[@Me Filter] Match: ' + (assignee.toLowerCase() === currentUserEmail.toLowerCase())
-                                 });
-                                 window._meFilterLogCount++;
-                             }
-                             if (assignee.toLowerCase() === currentUserEmail.toLowerCase()) {
-                                 match = true;
-                             }
-                         } else {
-                             // Log if we're missing required data
-                             if (!window._meFilterWarningLogged) {
-                                 vscode.postMessage({
-                                     command: 'debugLog',
-                                     text: '[@Me Filter] WARNING - Missing data: assignee=' + (!!assignee) + ', currentUserEmail=' + (!!currentUserEmail) + ', value="' + currentUserEmail + '"'
-                                 });
-                                 window._meFilterWarningLogged = true;
-                             }
-                         }
-                    }
-                    if (assigneeValues.includes('unassigned')) {
-                        if (!assignee) match = true;
-                    }
-
-                    // Check specific assignees
-                    if (!match && assignee) {
-                        if (assigneeValues.includes(assignee)) {
-                            match = true;
-                        }
-                    }
-
-                    if (!match) visible = false;
-                }
-
-                // Type filter
-                if (visible && !typeAll) {
-                    if (!typeValues.includes(card.dataset.type)) {
-                        visible = false;
-                    }
-                }
-
-                // Priority filter
-                if (visible && !priorityAll) {
-                    const cardPriority = card.dataset.priority;
-                    if (!priorityValues.includes(cardPriority)) {
-                        visible = false;
-                    }
-                }
-
-                // State filter
-                if (visible && !stateAll) {
-                    const cardState = card.dataset.state;
-                    if (!stateValues.includes(cardState)) {
-                        visible = false;
-                    }
-                }
-
-                // Area filter
-                if (visible && !areaAll) {
-                    const cardArea = card.dataset.areapath;
-                    if (!areaValues.includes(cardArea)) {
-                        visible = false;
-                    }
-                }
-
-                // Iteration filter
-                if (visible && !iterationAll) {
-                    const cardIteration = card.dataset.iterationpath;
-                    let match = false;
-
-                    // Check for @CurrentIteration special value
-                    if (iterationValues.includes('@currentiteration')) {
-                        if (cardIteration && currentIterationPath && cardIteration === currentIterationPath) {
-                            match = true;
-                        }
-                    }
-
-                    // Check specific iterations
-                    if (!match && iterationValues.includes(cardIteration)) {
-                        match = true;
-                    }
-
-                    if (!match) {
-                        visible = false;
-                    }
-                }
-
-                // Hide Done toggle
-                if (visible && hideDoneActive) {
-                    const state = card.dataset.state.toLowerCase();
-                    if (state === 'done' || state === 'closed' || state === 'completed') {
-                        visible = false;
-                    }
-                }
-
-                if (visible) {
-                    card.classList.remove('filtered-out');
-                    visibleCount++;
-                } else {
-                    card.classList.add('filtered-out');
-                }
-            });
-
-            updateFilterCounts();
-            updateColumnVisibleCounts();
-
-            // Save filter state so it persists across board updates
-            saveFilterState();
-        }
-
-        function saveFilterState() {
-            const filterState = {
-                search: document.getElementById('searchInput').value,
-                assignee: getSelectedValues('assignee'),
-                type: getSelectedValues('type'),
-                priority: getSelectedValues('priority'),
-                state: getSelectedValues('state'),
-                area: getSelectedValues('area'),
-                iteration: getSelectedValues('iteration'),
-                hideDone: hideDoneActive
-            };
-            vscode.postMessage({ command: 'saveFilterState', filterState });
-        }
-
-        function updateFilterCounts() {
-            const cards = document.querySelectorAll('.card');
-            const visibleCards = document.querySelectorAll('.card:not(.filtered-out)');
-            document.getElementById('visibleCount').textContent = visibleCards.length;
-            document.getElementById('totalCount').textContent = cards.length;
-        }
-
-        function updateColumnVisibleCounts() {
-            document.querySelectorAll('.column').forEach(column => {
-                const allCards = column.querySelectorAll('.card');
-                const visibleCards = column.querySelectorAll('.card:not(.filtered-out)');
-                const badge = column.querySelector('.wip-badge');
-                const limit = parseInt(column.dataset.limit) || 0;
-
-                // Update badge to show visible count
-                badge.textContent = limit > 0 ? visibleCards.length + '/' + limit : visibleCards.length;
-
-                // Update badge color based on visible count
-                badge.classList.remove('warning', 'danger');
-                if (limit > 0) {
-                    if (visibleCards.length >= limit) {
-                        badge.classList.add('danger');
-                    } else if (visibleCards.length >= limit * 0.8) {
-                        badge.classList.add('warning');
-                    }
-                }
-            });
-        }
-
-        function isAnyFilterActive() {
-            const assigneeChecked = document.querySelectorAll('#assigneeDropdownContent input[type="checkbox"]:checked').length > 0;
-            const typeChecked = document.querySelectorAll('#typeDropdownContent input[type="checkbox"]:checked').length > 0;
-            const priorityChecked = document.querySelectorAll('#priorityDropdownContent input[type="checkbox"]:checked').length > 0;
-            const stateChecked = document.querySelectorAll('#stateDropdownContent input[type="checkbox"]:checked').length > 0;
-            const areaChecked = document.querySelectorAll('#areaDropdownContent input[type="checkbox"]:checked').length > 0;
-            const iterationChecked = document.querySelectorAll('#iterationDropdownContent input[type="checkbox"]:checked').length > 0;
-
-            return document.getElementById('searchInput').value.trim() !== '' ||
-                   assigneeChecked ||
-                   typeChecked ||
-                   priorityChecked ||
-                   stateChecked ||
-                   areaChecked ||
-                   iterationChecked ||
-                   hideDoneActive;
-        }
-
-        function clearSearch() {
-            document.getElementById('searchInput').value = '';
-            applyFilters();
-        }
-
-        function toggleHideDone() {
-            hideDoneActive = !hideDoneActive;
-            const toggle = document.getElementById('hideDoneToggle');
-            toggle.classList.toggle('active', hideDoneActive);
-            applyFilters();
-        }
-
-        // Add 'F' keyboard shortcut to toggle filter bar
-        const originalKeydownHandler = handleGlobalKeydown;
-        function handleGlobalKeydownWithFilter(event) {
-            if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-                return;
-            }
-            if (event.key === 'f' || event.key === 'F') {
-                if (!event.ctrlKey && !event.metaKey) {
-                    toggleFilterBar();
-                    // Focus search input if filter bar is now visible
-                    const filterBar = document.getElementById('filterBar');
-                    if (!filterBar.classList.contains('collapsed')) {
-                        document.getElementById('searchInput').focus();
-                    }
-                    return;
-                }
-            }
-            // Call original handler for other keys
-            originalKeydownHandler(event);
-        }
-        // Replace the keydown handler
-        document.removeEventListener('keydown', handleGlobalKeydown);
-        document.addEventListener('keydown', handleGlobalKeydownWithFilter);
-
-        // Handle current user response from extension
-        window.addEventListener('message', event => {
-            const message = event.data;
-            if (message.command === 'setCurrentUser') {
-                currentUserEmail = message.email || '';
-                vscode.postMessage({
-                    command: 'debugLog',
-                    text: '[@Me Filter] Current user set to: "' + currentUserEmail + '"'
-                });
-                // Re-apply filters now that we have the current user info
-                // This ensures @Me works correctly even if data arrives late
-                applyFilters();
-            } else if (message.command === 'restoreFilterState') {
-                restoreFilterState(message.filterState);
-            }
-        });
-
-        function restoreFilterState(filterState) {
-            if (!filterState) return;
-
-            // Restore search
-            if (filterState.search) {
-                const searchInput = document.getElementById('searchInput');
-                if (searchInput) searchInput.value = filterState.search;
-            }
-
-            // Restore checkboxes for each filter type
-            const filterTypes = ['assignee', 'type', 'priority', 'state', 'area', 'iteration'];
-            filterTypes.forEach(type => {
-                if (filterState[type] && filterState[type].length > 0) {
-                    const container = document.getElementById(type + 'DropdownContent');
-                    if (container) {
-                        const checkboxes = container.querySelectorAll('input[type="checkbox"]');
-                        checkboxes.forEach(cb => {
-                            cb.checked = filterState[type].includes(cb.value);
-                        });
-                        updateDropdownButton(type);
-                    }
-                }
-            });
-
-            // Restore hide done toggle (default is true, so only change if explicitly false)
-            if (filterState.hideDone !== undefined) {
-                hideDoneActive = filterState.hideDone;
-                const toggle = document.getElementById('hideDoneToggle');
-                if (toggle) {
-                    if (hideDoneActive) {
-                        toggle.classList.add('active');
-                    } else {
-                        toggle.classList.remove('active');
-                    }
-                }
-            }
-
-            // Apply the restored filters
-            applyFilters();
-        }
-
-        // Keep scroll positions, collapsed columns and the filter bar across refreshes, and tell
-        // the extension while the person is dragging, editing or has a menu open, so an automatic
-        // refresh doesn't redraw the board under them.
-        (function () {
-            // Saved per board, so switching boards doesn't carry one board's layout to another
-            const boardKey = ${serializeForScript(this.boardId)};
-            function persistView(view) {
-                const state = vscode.getState() || {};
-                const views = Object.assign({}, state.views || {});
-                views[boardKey] = view;
-                vscode.setState(Object.assign({}, state, { views: views }));
-            }
-
-            function captureView() {
-                const container = document.getElementById('boardContainer');
-                const columnScroll = {};
-                const collapsed = [];
-                document.querySelectorAll('.column').forEach(col => {
-                    const name = col.dataset.column;
-                    const body = col.querySelector('.column-body');
-                    if (body && body.scrollTop) columnScroll[name] = body.scrollTop;
-                    if (col.classList.contains('collapsed')) collapsed.push(name);
-                });
-                const filterBar = document.getElementById('filterBar');
-                const search = document.getElementById('searchInput');
-                persistView({
-                    x: window.scrollX,
-                    y: window.scrollY,
-                    boardX: container ? container.scrollLeft : 0,
-                    columnScroll: columnScroll,
-                    collapsed: collapsed,
-                    filterBarCollapsed: filterBar ? filterBar.classList.contains('collapsed') : undefined,
-                    searchFocused: !!search && document.activeElement === search,
-                    searchCaret: search && document.activeElement === search ? search.selectionStart : null
-                });
-            }
-
-            function restoreView(view) {
-                if (!view) return;
-                (view.collapsed || []).forEach(name => {
-                    const col = Array.from(document.querySelectorAll('.column')).find(c => c.dataset.column === name);
-                    if (col && !col.classList.contains('collapsed')) toggleColumn(col);
-                });
-                const filterBar = document.getElementById('filterBar');
-                if (filterBar && typeof view.filterBarCollapsed === 'boolean'
-                    && filterBar.classList.contains('collapsed') !== view.filterBarCollapsed) {
-                    toggleFilterBar();
-                }
-                const container = document.getElementById('boardContainer');
-                if (container && view.boardX) container.scrollLeft = view.boardX;
-                document.querySelectorAll('.column').forEach(col => {
-                    const top = (view.columnScroll || {})[col.dataset.column];
-                    const body = col.querySelector('.column-body');
-                    if (body && top) body.scrollTop = top;
-                });
-                if (view.x || view.y) window.scrollTo(view.x || 0, view.y || 0);
-                const search = document.getElementById('searchInput');
-                if (search && view.searchFocused) {
-                    search.focus();
-                    if (typeof view.searchCaret === 'number') search.setSelectionRange(view.searchCaret, view.searchCaret);
-                }
-            }
-
-            restoreView(((vscode.getState() || {}).views || {})[boardKey]);
-
-            let captureTimer = null;
-            function scheduleCapture() {
-                clearTimeout(captureTimer);
-                captureTimer = setTimeout(captureView, 150);
-            }
-            window.addEventListener('scroll', scheduleCapture, true);
-            document.addEventListener('click', scheduleCapture, true);
-            document.addEventListener('focusin', scheduleCapture);
-            document.addEventListener('keyup', scheduleCapture);
-
-            function isBusy() {
-                if (draggedCard || keyboardMoveMode) return true;
-                if (document.querySelector('.context-menu.show, .card-menu.show, .board-dropdown.show, .filter-dropdown-content.show')) return true;
-                const active = document.activeElement;
-                if (active && active.id !== 'searchInput'
-                    && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT' || active.isContentEditable)) {
-                    return true;
-                }
-                return false;
-            }
-
-            // Unset at first, so a new page always reports its state; a page that replaced a busy
-            // one would otherwise leave automatic refreshes waiting.
-            let lastBusy = null;
-            setInterval(function () {
-                const busy = isBusy();
-                if (busy !== lastBusy) {
-                    lastBusy = busy;
-                    vscode.postMessage({ command: 'uiBusy', busy: busy });
-                }
-            }, 500);
-        })();
-    </script>
+    <script nonce="${nonce}" id="board-data" type="application/json">${serializeForScript(boardData)}</script>
+    <script nonce="${nonce}" src="${handlersJsUri}"></script>
+    <script nonce="${nonce}" src="${boardJsUri}"></script>
 </body>
 </html>`;
     }
@@ -5657,31 +2618,31 @@ export class BoardPanel {
              data-effort="${effort}"
              ${cardStyle}
              tabindex="0"
-             ondragstart="handleDragStart(event, ${item.id})"
-             ondragend="handleDragEnd(event)"
-             onclick="openWorkItem(${item.id})"
-             onfocus="selectCard(this)">
+             data-dragstart="handleDragStart" data-dragstart-args='["$event", ${item.id}]'
+             data-dragend="handleDragEnd" data-dragend-args='["$event"]'
+             data-click="openWorkItem" data-click-args='[${item.id}]'
+             data-focus="selectCard" data-focus-args='["$el"]'>
             <div class="card-header">
                 <span class="card-type-icon" title="${this._escapeHtml(item.type)}">${typeIcon}</span>
                 <div class="card-header-content">
                     <div class="card-id-title">
-                        <span class="card-id" onclick="event.stopPropagation(); openWorkItem(${item.id})">${item.id}</span>
-                        <span class="card-title" ondblclick="event.stopPropagation(); editCardTitle(this, ${item.id})">${this._escapeHtml(item.title)}</span>
+                        <span class="card-id" data-click="openWorkItem" data-click-args='[${item.id}]' data-stop>${item.id}</span>
+                        <span class="card-title" data-dblclick="editCardTitle" data-dblclick-args='["$el", ${item.id}]' data-stop>${this._escapeHtml(item.title)}</span>
                     </div>
                 </div>
-                <button class="card-menu-btn" onclick="event.stopPropagation(); showCardMenu(event, ${item.id})" title="More options">⋯</button>
+                <button class="card-menu-btn" data-click="showCardMenu" data-click-args='["$event", ${item.id}]' data-stop title="More options">⋯</button>
             </div>
             <div class="card-status">
                 <span class="status-dot ${stateClass}"></span>
                 <span class="status-label">${this._escapeHtml(item.state)}</span>
             </div>
-            <div class="card-assignee" onclick="event.stopPropagation(); changeCardAssignee(${item.id}, ${jsArg(item.assignedTo?.displayName || '')})">
+            <div class="card-assignee" data-click="changeCardAssignee" data-click-args='[${item.id}, ${jsArg(item.assignedTo?.displayName || '')}]' data-stop>
                 <div class="card-avatar ${!item.assignedTo ? 'unassigned' : ''}">${initials}</div>
                 <span class="card-assignee-name ${!item.assignedTo ? 'unassigned-text' : ''}">${item.assignedTo ? this._escapeHtml(item.assignedTo.displayName) : ''}</span>
             </div>
             ${item.effort ? `<div class="card-effort">
                 <span class="card-effort-label">Effort</span>
-                <span class="card-effort-value" onclick="event.stopPropagation(); editCardEffort(this, ${item.id}, ${item.effort})">${item.effort}</span>
+                <span class="card-effort-value" data-click="editCardEffort" data-click-args='["$el", ${item.id}, ${item.effort}]' data-stop>${item.effort}</span>
             </div>` : ''}
             ${tags ? `<div class="card-tags">${tags}</div>` : ''}
             ${this._renderChildIndicator(item)}
@@ -5721,7 +2682,7 @@ export class BoardPanel {
             // Each indicator toggles its own type-specific checklist
             indicators.push(`
                 <div class="child-indicator-item ${allClosed ? 'completed' : ''}"
-                     onclick="event.stopPropagation(); toggleChildChecklist(${item.id}, '${typeId}')"
+                     data-click="toggleChildChecklist" data-click-args='[${item.id}, ${jsArg(typeId)}]' data-stop
                      title="Click to expand/collapse ${this._escapeHtml(type)} checklist">
                     ${childIcon}
                     <span class="child-count">${closedChildren}/${totalChildren}</span>
@@ -5735,7 +2696,7 @@ export class BoardPanel {
             checklistContent.push(`
                 <div class="checklist-add-item">
                     <button class="checklist-add-button"
-                            onclick="event.stopPropagation(); addChildWorkItem(${item.id}, ${jsArg(type)})"
+                            data-click="addChildWorkItem" data-click-args='[${item.id}, ${jsArg(type)}]' data-stop
                             title="Add new ${this._escapeHtml(type)}">
                         <span class="add-icon">+</span> Add ${this._escapeHtml(type)}
                     </button>
@@ -5757,13 +2718,13 @@ export class BoardPanel {
                                class="checklist-checkbox"
                                ${isDone ? 'checked' : ''}
                                data-child-id="${child.id}"
-                               onclick="event.stopPropagation(); toggleChildState(${child.id}, ${item.id}, this.checked)"
+                               data-click="toggleChildState" data-click-args='[${child.id}, ${item.id}, "$checked"]' data-stop
                                title="Mark as ${isDone ? 'not done' : 'done'}">
                         <span class="checklist-icon">${this._getChildTypeIcon(child.type)}</span>
                         <div class="checklist-avatar card-avatar ${!child.assignedTo ? 'unassigned' : ''}"
                              title="${child.assignedTo ? this._escapeHtml(child.assignedTo.displayName) : 'Unassigned'}">${initials}</div>
                         <span class="checklist-title ${isDone ? 'done' : ''}"
-                              onclick="event.stopPropagation(); openWorkItem(${child.id})"
+                              data-click="openWorkItem" data-click-args='[${child.id}]' data-stop
                               title="Click to open ${this._escapeHtml(child.title)}">${this._escapeHtml(child.title)}</span>
                     </div>
                 `);

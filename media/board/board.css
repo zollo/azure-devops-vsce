@@ -1,0 +1,1565 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: var(--vscode-font-family);
+    background: var(--vscode-editor-background);
+    color: var(--vscode-foreground);
+    overflow-x: auto;
+    min-height: 100vh;
+}
+
+/* Codicon Icons */
+.codicon {
+    font-family: 'codicon';
+    font-size: 16px;
+    display: inline-block;
+    line-height: 1;
+    text-align: center;
+    vertical-align: middle;
+}
+
+/* Board Header */
+.board-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: var(--vscode-sideBar-background);
+    border-bottom: 1px solid var(--vscode-panel-border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.board-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.board-selector {
+    position: relative;
+}
+
+.board-selector-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--vscode-dropdown-background);
+    border: 1px solid var(--vscode-dropdown-border);
+    border-radius: 4px;
+    color: var(--vscode-dropdown-foreground);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.board-selector-btn:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.board-selector-btn::after {
+    content: '▼';
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+.board-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    min-width: 200px;
+    background: var(--vscode-dropdown-background);
+    border: 1px solid var(--vscode-dropdown-border);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    z-index: 200;
+    margin-top: 4px;
+}
+
+.board-dropdown.show {
+    display: block;
+}
+
+.board-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.1s;
+}
+
+.board-dropdown-item:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.board-dropdown-item.active {
+    background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground);
+}
+
+.board-icon {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.board-icon svg {
+    display: block;
+}
+
+.board-name {
+    flex: 1;
+}
+
+.board-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn {
+    padding: 6px 12px;
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+}
+
+.btn:hover {
+    background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.btn:active {
+    transform: scale(0.95);
+}
+
+.btn.icon-btn {
+    padding: 6px 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn.icon-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.btn.icon-btn.active {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.btn-primary {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.btn-primary:hover {
+    background: var(--vscode-button-hoverBackground);
+}
+
+/* Board Container */
+.board-container {
+    display: flex;
+    gap: 0;
+    min-height: calc(100vh - 120px);
+    overflow-x: auto;
+}
+
+/* Columns */
+.column {
+    flex: 0 0 320px;
+    min-width: 320px;
+    background: var(--vscode-editor-background);
+    border-right: 3px solid var(--vscode-panel-border);
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s ease;
+}
+
+.column.collapsed {
+    flex: 0 0 48px;
+    min-width: 48px;
+}
+
+.column.collapsed .column-body,
+.column.collapsed .add-item-header-btn,
+.column.collapsed .add-item-form-container {
+    display: none;
+}
+
+.column.collapsed .column-header {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    padding: 12px 8px;
+    height: 100%;
+}
+
+.column.collapsed .column-title {
+    transform: rotate(180deg);
+}
+
+.column.drag-over {
+    /* No visual change */
+}
+
+.column.keyboard-focus {
+    /* Removed box-shadow */
+}
+
+.column-header {
+    padding: 12px 14px;
+    border-bottom: 3px solid var(--vscode-panel-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.column-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.collapse-btn {
+    background: transparent;
+    border: none;
+    color: var(--vscode-descriptionForeground);
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-size: 12px;
+    transition: all 0.1s;
+}
+
+.collapse-btn:hover {
+    background: var(--vscode-toolbar-hoverBackground);
+    color: var(--vscode-foreground);
+}
+
+.column-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--vscode-foreground);
+}
+
+.column-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.add-item-header-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: transparent;
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 4px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.add-item-header-btn:hover {
+    background: var(--vscode-list-hoverBackground);
+    color: var(--vscode-foreground);
+    border-color: var(--vscode-focusBorder);
+}
+
+.add-item-header-btn:active {
+    transform: scale(0.95);
+}
+
+.add-item-header-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+.add-item-form-container {
+    padding: 0 12px;
+    border-bottom: 1px solid transparent;
+    background: var(--vscode-editor-background);
+    height: 0;
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: height 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                padding 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    z-index: 100;
+}
+
+.add-item-form-container.active {
+    height: 44px;
+    padding: 8px 12px;
+    opacity: 1;
+    transform: translateY(0);
+    border-bottom-color: var(--vscode-panel-border);
+}
+
+.add-item-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.add-item-type-selector {
+    flex-shrink: 0;
+}
+
+.add-item-type-select {
+    padding: 6px 28px 6px 8px;
+    background: var(--vscode-dropdown-background);
+    color: var(--vscode-dropdown-foreground);
+    border: 1px solid var(--vscode-dropdown-border);
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    min-width: 120px;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M2 4l4 4 4-4z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+}
+
+.add-item-type-select:hover {
+    border-color: var(--vscode-focusBorder);
+}
+
+.add-item-type-select:focus {
+    outline: none;
+    border-color: var(--vscode-focusBorder);
+}
+
+.add-item-form-container .add-item-input {
+    flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+.add-item-submit {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+/* Custom Type Dropdown - Icon Only */
+.add-item-type-dropdown {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.add-item-type-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 8px;
+    background: var(--vscode-dropdown-background);
+    color: var(--vscode-dropdown-foreground);
+    border: 1px solid var(--vscode-dropdown-border);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.add-item-type-btn:hover {
+    border-color: var(--vscode-focusBorder);
+    background: var(--vscode-list-hoverBackground);
+}
+
+.add-item-type-btn .type-icon {
+    font-size: 16px;
+    line-height: 1;
+}
+
+.add-item-type-btn .dropdown-arrow {
+    opacity: 0.7;
+    transition: transform 0.2s ease;
+}
+
+.add-item-type-dropdown.open .add-item-type-btn .dropdown-arrow {
+    transform: rotate(180deg);
+}
+
+.add-item-type-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    background: var(--vscode-dropdown-background);
+    border: 1px solid var(--vscode-dropdown-border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    z-index: 10000;
+    display: flex;
+    flex-direction: row;
+    gap: 2px;
+    padding: 6px;
+    opacity: 0;
+    transform: translateY(-8px) scale(0.95);
+    pointer-events: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.add-item-type-dropdown.open .add-item-type-menu {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+
+.type-menu-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.type-menu-item:hover {
+    background: var(--vscode-list-hoverBackground);
+    transform: scale(1.1);
+}
+
+.type-menu-item.selected {
+    background: var(--vscode-list-activeSelectionBackground);
+}
+
+.type-menu-item .type-icon {
+    font-size: 18px;
+    line-height: 1;
+}
+
+.wip-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+}
+
+.wip-badge.warning {
+    background: #f59e0b;
+    color: #000;
+}
+
+.wip-badge.danger {
+    background: #ef4444;
+    color: #fff;
+}
+
+.column-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.column-body.scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
+}
+
+/* Drop Placeholder */
+.drop-placeholder {
+    display: none;
+}
+
+/* Work Item Cards - MODERN DESIGN */
+.card {
+    background: var(--vscode-editor-background);
+    border: 2px solid rgba(128, 128, 128, 0.45);
+    border-left: 6px solid var(--card-type-color, #4396C2);
+    border-radius: 6px;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    color: #ffffff;
+}
+
+.card.has-children {
+    padding-bottom: 36px;
+}
+
+.card:hover {
+    background: var(--vscode-list-hoverBackground);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.card.dragging {
+    opacity: 0.5;
+}
+
+.card.keyboard-moving {
+    outline: 2px solid var(--card-type-color, #4396C2);
+    box-shadow: 0 0 0 4px rgba(67, 150, 194, 0.2);
+}
+
+/* Card click animation - smooth pulse effect */
+.card.clicking {
+    animation: cardPulse 200ms ease-out;
+}
+
+@keyframes cardPulse {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(0.95);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+/* Work Item Type Colors - Azure DevOps Standard */
+.card[data-type="User Story"] { --card-type-color: #4396C2; }
+.card[data-type="Product Backlog Item"] { --card-type-color: #4396C2; }
+.card[data-type="Requirement"] { --card-type-color: #4396C2; }
+.card[data-type="Feature"] { --card-type-color: #773b93; }
+.card[data-type="Epic"] { --card-type-color: #ff7b00; }
+.card[data-type="Bug"] { --card-type-color: #cc293d; }
+.card[data-type="Task"] { --card-type-color: #f2cb1d; }
+.card[data-type="Issue"] { --card-type-color: #207752; }
+.card[data-type="Impediment"] { --card-type-color: #b4009e; }
+.card[data-type="Risk"] { --card-type-color: #ff9d00; }
+.card[data-type="Change Request"] { --card-type-color: #b4009e; }
+.card[data-type="Review"] { --card-type-color: #773b93; }
+.card[data-type="Test Case"] { --card-type-color: #004b50; }
+.card[data-type="Test Plan"] { --card-type-color: #004b50; }
+.card[data-type="Test Suite"] { --card-type-color: #004b50; }
+
+/* Card Type Icon */
+.card-type-icon {
+    width: 18px;
+    height: 18px;
+    font-size: 16px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 8px;
+    position: relative;
+}
+
+.card-header-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.card-menu-btn {
+    background: transparent;
+    border: none;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 16px;
+    line-height: 1;
+    opacity: 0;
+    transition: all 0.2s;
+}
+
+.card:hover .card-menu-btn {
+    opacity: 0.6;
+}
+
+.card-menu-btn:hover {
+    opacity: 1 !important;
+    background: var(--vscode-toolbar-hoverBackground);
+}
+
+.card-id-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.card-id {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ffffff;
+    cursor: pointer;
+}
+
+.card-id:hover {
+    text-decoration: underline;
+}
+
+.card-title {
+    font-size: 13px;
+    color: #ffffff;
+    line-height: 1.4;
+    word-wrap: break-word;
+}
+
+.card-title-editable {
+    width: 100%;
+    background: var(--vscode-input-background);
+    border: 1px solid var(--vscode-focusBorder);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 13px;
+    color: var(--vscode-input-foreground);
+    font-family: inherit;
+}
+
+.card-title-editable:focus {
+    outline: none;
+}
+
+/* Status Indicator */
+.card-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.status-dot.todo {
+    background: #71717a;
+}
+
+.status-dot.doing {
+    background: #3b82f6;
+}
+
+.status-dot.done {
+    background: #22c55e;
+}
+
+.status-label {
+    font-size: 12px;
+    color: #ffffff;
+}
+
+/* Assignee */
+.card-assignee {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    padding: 4px;
+    margin: 0 -4px 8px -4px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.card-assignee:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.card-avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 500;
+    /* Colors set dynamically via JavaScript based on user */
+}
+
+.card-avatar.unassigned {
+    background: rgba(139, 139, 139, 0.3);
+    color: #8b8b8b;
+}
+
+.card-assignee-name {
+    font-size: 12px;
+    color: #ffffff;
+}
+
+.card-assignee-name.unassigned-text {
+    color: #ffffff;
+    opacity: 0.6;
+    font-style: italic;
+}
+
+/* Effort */
+.card-effort {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: #ffffff;
+}
+
+.card-effort-label {
+    color: rgba(255, 255, 255, 0.7);
+    flex-shrink: 0;
+}
+
+.card-effort-value {
+    font-weight: 500;
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 4px;
+    transition: background 0.2s;
+    flex: 1;
+    text-align: center;
+}
+
+.card-effort-value:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.card-effort-input {
+    flex: 1;
+    text-align: center;
+    background: var(--vscode-input-background);
+    border: 1px solid var(--vscode-focusBorder);
+    border-radius: 4px;
+    padding: 2px 4px;
+    font-size: 12px;
+    color: var(--vscode-input-foreground);
+    font-family: inherit;
+}
+
+.card-effort-input:focus {
+    outline: none;
+}
+
+/* Tags */
+.card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.tag {
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+    border: 1px solid;
+    white-space: nowrap;
+}
+
+/* Card Footer */
+.card-footer {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--vscode-panel-border);
+}
+
+/* Child work items indicator */
+.child-indicators-container {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.child-indicator-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: #ffffff;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.child-indicator-item:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.child-indicator-item svg {
+    flex-shrink: 0;
+}
+
+.child-indicator-item.completed {
+    text-decoration: line-through;
+}
+
+.child-count {
+    line-height: 1;
+}
+
+/* Expandable checklist styles - Match Azure DevOps browser exactly */
+.child-checklist {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.35s ease-in-out, opacity 0.25s ease-in-out, margin-top 0.35s ease-in-out;
+    opacity: 0;
+    margin-top: 0;
+}
+
+.child-checklist.expanded {
+    max-height: 1200px;
+    opacity: 1;
+    margin-top: 8px;
+}
+
+.checklist-content {
+    padding: 4px 0 0 0;
+}
+
+/* "Add Bug/Task" button - appears first, subtle styling */
+.checklist-add-item {
+    margin-bottom: 6px;
+    padding: 0;
+}
+
+.checklist-add-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: none;
+    color: #ffffff;
+    padding: 5px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 400;
+    width: 100%;
+    text-align: left;
+    transition: all 0.2s;
+}
+
+.checklist-add-button:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.add-icon {
+    font-size: 14px;
+    font-weight: bold;
+    line-height: 1;
+}
+
+/* Bug/Task item row - [checkbox][icon][avatar][title] */
+.checklist-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 4px;
+    transition: background-color 0.2s;
+    min-height: 28px;
+}
+
+.checklist-item:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 3px;
+}
+
+.checklist-item.done .checklist-title {
+    text-decoration: line-through;
+}
+
+/* Checkbox - 16x16px, matches filter checkboxes */
+.checklist-checkbox {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    margin: 0;
+    /* Custom checkbox styling to match filter checkboxes */
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    border: 1.5px solid var(--vscode-foreground, #cccccc);
+    border-radius: 3px;
+    background: var(--vscode-checkbox-background, transparent);
+    position: relative;
+    vertical-align: middle;
+}
+
+.checklist-checkbox:hover {
+    border-color: var(--vscode-focusBorder, #007acc);
+}
+
+.checklist-checkbox:checked {
+    background: var(--vscode-button-background, #0e639c);
+    border-color: var(--vscode-button-background, #0e639c);
+}
+
+.checklist-checkbox:checked::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 5px;
+    height: 9px;
+    border: solid var(--vscode-button-foreground, #ffffff);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.checklist-checkbox:focus {
+    outline: 1px solid var(--vscode-focusBorder, #007acc);
+    outline-offset: 1px;
+}
+
+/* Work item type icon - 12x12px */
+.checklist-icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    width: 12px;
+    height: 12px;
+}
+
+.checklist-icon svg {
+    width: 12px;
+    height: 12px;
+}
+
+/* Avatar - 18x18px, appears AFTER icon, BEFORE title - uses same colors as card avatars */
+.checklist-avatar {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    /* Color will be set dynamically by applyAvatarColors() function */
+}
+
+.checklist-avatar.unassigned {
+    background-color: var(--vscode-input-background);
+    color: #ffffff;
+    border: 1px solid var(--vscode-input-border);
+}
+
+/* Title - clickable, underlined, flex fills remaining space */
+.checklist-title {
+    flex: 1;
+    font-size: 13px;
+    color: #ffffff;
+    cursor: pointer;
+    user-select: none;
+    text-decoration: underline;
+    line-height: 1.4;
+    font-weight: 400;
+}
+
+.checklist-title:hover {
+    color: #ffffff;
+}
+
+.checklist-title.done {
+    color: #ffffff;
+}
+
+.card-effort-toggle {
+    background: transparent;
+    border: 1px solid var(--vscode-input-border);
+    color: #ffffff;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s;
+    width: 100%;
+    justify-content: center;
+}
+
+.card-effort-toggle:hover {
+    background: var(--vscode-list-hoverBackground);
+    border-color: var(--vscode-focusBorder);
+}
+
+.effort-icon {
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+.effort-value {
+    font-weight: 500;
+}
+
+/* Card Menu Dropdown */
+.card-menu {
+    position: fixed;
+    min-width: 180px;
+    background: var(--vscode-menu-background);
+    border: 1px solid var(--vscode-menu-border);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    padding: 4px 0;
+    opacity: 0;
+    transform: translateY(-10px);
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.card-menu.show {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.card-menu-item {
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--vscode-menu-foreground);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s;
+}
+
+.card-menu-item .menu-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    filter: brightness(0) saturate(100%) invert(var(--vscode-icon-foreground-opacity, 0.8));
+}
+
+.card-menu-item .menu-icon.test-icon {
+    width: 23px;
+    height: 23px;
+}
+
+.card-menu-item:hover .menu-icon {
+    filter: brightness(0) saturate(100%) invert(1);
+}
+
+.card-menu-item:hover {
+    background: var(--vscode-menu-selectionBackground);
+    color: var(--vscode-menu-selectionForeground);
+}
+
+.card-menu-item.danger:hover {
+    background: rgba(209, 52, 56, 0.2);
+    color: #d13438;
+}
+
+.card-menu-separator {
+    height: 1px;
+    background: var(--vscode-menu-separatorBackground);
+    margin: 4px 0;
+}
+
+/* Context Menu */
+.context-menu {
+    display: none;
+    position: fixed;
+    min-width: 180px;
+    background: var(--vscode-menu-background);
+    border: 1px solid var(--vscode-menu-border);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    padding: 4px 0;
+}
+
+.context-menu.show {
+    display: block;
+}
+
+.context-menu-item {
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--vscode-menu-foreground);
+    transition: background 0.1s;
+}
+
+.context-menu-item:hover {
+    background: var(--vscode-menu-selectionBackground);
+    color: var(--vscode-menu-selectionForeground);
+}
+
+.context-menu-item .icon {
+    width: 16px;
+    text-align: center;
+}
+
+.context-menu-separator {
+    height: 1px;
+    background: var(--vscode-menu-separatorBackground);
+    margin: 4px 0;
+}
+
+.context-menu-submenu {
+    position: relative;
+}
+
+.context-menu-submenu::after {
+    content: '▶';
+    font-size: 10px;
+    margin-left: auto;
+}
+
+.submenu {
+    display: none;
+    position: absolute;
+    left: 100%;
+    top: 0;
+    min-width: 150px;
+    background: var(--vscode-menu-background);
+    border: 1px solid var(--vscode-menu-border);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    padding: 4px 0;
+}
+
+.context-menu-submenu:hover .submenu {
+    display: block;
+}
+
+/* Add New Item Input */
+.add-item-input {
+    width: 100%;
+    padding: 8px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 4px;
+    font-size: 13px;
+    margin-bottom: 8px;
+}
+
+.add-item-input:focus {
+    outline: none;
+    border-color: var(--vscode-focusBorder);
+}
+
+.add-item-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* Toast */
+.toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: 12px 20px;
+    background: var(--vscode-notifications-background);
+    border: 1px solid var(--vscode-notifications-border);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    z-index: 1000;
+    display: none;
+    animation: slideIn 0.2s ease;
+}
+
+.toast.show {
+    display: block;
+}
+
+.toast.success {
+    border-left: 4px solid #10b981;
+}
+
+.toast.error {
+    border-left: 4px solid #ef4444;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Keyboard Help */
+.keyboard-help {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    padding: 8px 12px;
+    background: var(--vscode-notifications-background);
+    border: 1px solid var(--vscode-notifications-border);
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    display: none;
+}
+
+.keyboard-help.show {
+    display: block;
+}
+
+.keyboard-help kbd {
+    background: var(--vscode-button-secondaryBackground);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: monospace;
+    margin: 0 2px;
+}
+
+/* Empty Column */
+.empty-column {
+    text-align: center;
+    padding: 20px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+}
+
+/* Filter Bar */
+.filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    background: var(--vscode-sideBar-background);
+    border-bottom: 1px solid var(--vscode-panel-border);
+    flex-wrap: wrap;
+}
+
+.filter-bar.collapsed {
+    display: none;
+}
+
+.filter-search {
+    flex: 1;
+    min-width: 200px;
+    max-width: 300px;
+    position: relative;
+}
+
+.filter-search-input {
+    width: 100%;
+    padding: 6px 32px 6px 10px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.filter-search-input:focus {
+    outline: none;
+    border-color: var(--vscode-focusBorder);
+}
+
+.filter-search-input::placeholder {
+    color: var(--vscode-input-placeholderForeground);
+}
+
+.filter-search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    color: var(--vscode-descriptionForeground);
+    cursor: pointer;
+    font-size: 14px;
+    display: none;
+}
+
+.filter-search-input:not(:placeholder-shown) + .filter-search-clear {
+    display: block;
+}
+
+.filter-clear-btn {
+    width: 100%;
+    padding: 6px 12px;
+    background: transparent;
+    border: none;
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+    cursor: pointer;
+    text-align: right;
+    transition: all 0.15s;
+}
+
+.filter-clear-btn:not(:disabled) {
+    color: var(--vscode-foreground);
+}
+
+.filter-clear-btn:not(:disabled):hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.filter-clear-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.filter-select {
+    padding: 5px 24px 5px 8px;
+    background: var(--vscode-dropdown-background);
+    color: var(--vscode-dropdown-foreground);
+    border: 1px solid var(--vscode-dropdown-border);
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M3 5l3 3 3-3'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+}
+
+.filter-select:focus {
+    outline: none;
+    border-color: var(--vscode-focusBorder);
+}
+
+.filter-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background: transparent;
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 4px;
+    color: var(--vscode-foreground);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+}
+
+.filter-toggle:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.filter-toggle.active {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border-color: var(--vscode-button-background);
+}
+
+.filter-toggle-icon {
+    font-size: 14px;
+}
+
+.filter-divider {
+    width: 1px;
+    height: 24px;
+    background: var(--vscode-panel-border);
+}
+
+.filter-count {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    margin-left: auto;
+}
+
+.filter-count strong {
+    color: var(--vscode-foreground);
+}
+
+/* Hidden card when filtered */
+.card.filtered-out {
+    display: none;
+}
+
+/* Column hidden indicator when all items filtered */
+.column-filtered-info {
+    text-align: center;
+    padding: 16px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+    font-style: italic;
+}
+
+/* Filter Dropdown Styles */
+.filter-dropdown {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.filter-dropdown-btn {
+    padding: 5px 20px 5px 8px;
+    background: var(--vscode-dropdown-background);
+    color: var(--vscode-dropdown-foreground);
+    border: 1px solid var(--vscode-dropdown-border);
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    min-width: 100px;
+    width: auto;
+    text-align: left;
+    position: relative;
+    white-space: nowrap;
+    display: inline-block;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+}
+
+.filter-dropdown-btn:hover {
+    background: var(--vscode-list-hoverBackground);
+    border-color: var(--vscode-focusBorder);
+}
+
+.filter-dropdown-btn:active {
+    transform: scale(0.97);
+}
+
+.filter-dropdown-btn::after {
+    content: '❯';
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%) rotate(90deg);
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+/* Ensure iteration dropdown button never collapses */
+#iterationDropdownBtn {
+    min-width: 100px !important;
+    width: auto !important;
+}
+
+.filter-dropdown-content {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    min-width: 200px;
+    max-height: 300px;
+    overflow-y: auto;
+    background: var(--vscode-dropdown-background);
+    border: 1px solid var(--vscode-dropdown-border);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    z-index: 1000;
+    margin-top: 4px;
+    padding: 4px 0;
+}
+
+.filter-dropdown-content.show {
+    display: block;
+}
+
+.filter-checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--vscode-dropdown-foreground);
+    user-select: none;
+}
+
+.filter-checkbox-item:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.filter-checkbox-item input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+    /* Custom checkbox styling for proper dark theme support */
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    border: 1.5px solid var(--vscode-foreground, #cccccc);
+    border-radius: 3px;
+    background: var(--vscode-checkbox-background, transparent);
+    position: relative;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
+.filter-checkbox-item input[type="checkbox"]:hover {
+    border-color: var(--vscode-focusBorder, #007acc);
+}
+
+.filter-checkbox-item input[type="checkbox"]:checked {
+    background: var(--vscode-button-background, #0e639c);
+    border-color: var(--vscode-button-background, #0e639c);
+}
+
+.filter-checkbox-item input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 5px;
+    height: 9px;
+    border: solid var(--vscode-button-foreground, #ffffff);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.filter-checkbox-item input[type="checkbox"]:focus {
+    outline: 1px solid var(--vscode-focusBorder, #007acc);
+    outline-offset: 1px;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-background);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--vscode-scrollbarSlider-hoverBackground);
+}

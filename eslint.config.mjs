@@ -24,10 +24,14 @@ export default tseslint.config(
         }
     },
     {
-        // Scripts that run inside webviews.
+        // Scripts that run inside webviews. They are classic scripts: their top-level functions
+        // are globals that the page's data-click (and similar) attributes call by name.
         files: ['media/**/*.js'],
-        languageOptions: { globals: { ...globals.browser, acquireVsCodeApi: 'readonly' } },
-        rules: { '@typescript-eslint/no-require-imports': 'off' }
+        languageOptions: { sourceType: 'script', globals: { ...globals.browser, acquireVsCodeApi: 'readonly' } },
+        rules: {
+            '@typescript-eslint/no-require-imports': 'off',
+            '@typescript-eslint/no-unused-vars': ['error', { vars: 'local', args: 'none', caughtErrors: 'none' }]
+        }
     },
     {
         files: ['*.js', '*.mjs'],
