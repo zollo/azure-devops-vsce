@@ -667,6 +667,17 @@ function changeCardAssignee(workItemId, currentAssignee) {
     vscode.postMessage({ command: 'changeAssignee', workItemId: workItemId, currentAssignee: currentAssignee });
 }
 
+/** Fills a Story Points button with textContent, so the value is never parsed as HTML. */
+function fillEffortButton(button, effort) {
+    const icon = document.createElement('span');
+    icon.className = 'effort-icon';
+    icon.textContent = '▲';
+    const value = document.createElement('span');
+    value.className = 'effort-value';
+    value.textContent = effort || 'Story Points';
+    button.replaceChildren(icon, value);
+}
+
 // Effort/Story Points Editor
 function toggleEffortEditor(button, workItemId) {
     const card = button.closest('.card');
@@ -696,14 +707,7 @@ function toggleEffortEditor(button, workItemId) {
         newButton.className = 'card-effort-toggle';
         newButton.onclick = (e) => { e.stopPropagation(); toggleEffortEditor(newButton, workItemId); };
         newButton.title = 'Story Points';
-        // Built with textContent: the typed value is never parsed as HTML
-        const icon = document.createElement('span');
-        icon.className = 'effort-icon';
-        icon.textContent = '▲';
-        const value = document.createElement('span');
-        value.className = 'effort-value';
-        value.textContent = newEffort || 'Story Points';
-        newButton.replaceChildren(icon, value);
+        fillEffortButton(newButton, newEffort);
         input.replaceWith(newButton);
 
         card.dataset.effort = newEffort;
@@ -719,7 +723,7 @@ function toggleEffortEditor(button, workItemId) {
             newButton.className = 'card-effort-toggle';
             newButton.onclick = (ev) => { ev.stopPropagation(); toggleEffortEditor(newButton, workItemId); };
             newButton.title = 'Story Points';
-            newButton.innerHTML = `<span class="effort-icon">▲</span><span class="effort-value">${currentEffort || 'Story Points'}</span>`;
+            fillEffortButton(newButton, currentEffort);
             input.replaceWith(newButton);
         }
     });

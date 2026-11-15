@@ -29,8 +29,8 @@ export default tseslint.config(
         files: ['media/**/*.js'],
         languageOptions: {
             sourceType: 'script',
-            // Quill is the vendored rich text editor; bindWebviewHandlers comes from shared/webviewHandlers.js
-            globals: { ...globals.browser, acquireVsCodeApi: 'readonly', Quill: 'readonly', bindWebviewHandlers: 'readonly' }
+            // Quill is the vendored rich text editor; the *WebviewHandlers functions come from shared/webviewHandlers.js
+            globals: { ...globals.browser, acquireVsCodeApi: 'readonly', Quill: 'readonly', bindWebviewHandlers: 'readonly', allowWebviewHandlers: 'readonly' }
         },
         rules: {
             '@typescript-eslint/no-require-imports': 'off',

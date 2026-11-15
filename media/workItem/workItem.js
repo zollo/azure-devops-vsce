@@ -1,5 +1,7 @@
 // Work item panel script. Loaded with a nonce; the extension passes data in #work-item-data.
 const WORK_ITEM_DATA = JSON.parse(document.getElementById('work-item-data').textContent);
+// Handlers used only in markup this script builds (tag suggestions)
+allowWebviewHandlers(['selectTag', 'removeTag', 'handleTagInput', 'handleTagKeydown', 'showTagSuggestions', 'hideTagSuggestions']);
 const vscode = acquireVsCodeApi();
 console.log('WorkItem panel script loaded');
 

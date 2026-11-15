@@ -12,6 +12,10 @@
 // reaching outer elements, like event.stopPropagation() did in the inline handlers.
 //
 // Elements added later (menus, re-rendered cards) are connected as they appear.
+//
+// Only functions named in the page as the extension rendered it can be called, plus any a
+// script adds with allowWebviewHandlers(names). Markup that arrives later, such as pasted
+// rich text, can't name some other global function and have it run.
 (function () {
     'use strict';
 
@@ -19,6 +23,26 @@
         'dragstart', 'dragover', 'dragleave', 'drop', 'dragend', 'contextmenu', 'mousedown'];
     var SELECTOR = EVENTS.map(function (name) { return '[data-' + name + ']'; }).join(',');
     var bound = new WeakMap();
+    var allowed = Object.create(null);
+
+    function allow(names) {
+        names.forEach(function (name) {
+            if (/^[A-Za-z_$][\w$]*$/.test(name)) {
+                allowed[name] = true;
+            }
+        });
+    }
+
+    function collectAllowed(root) {
+        root.querySelectorAll(SELECTOR).forEach(function (el) {
+            EVENTS.forEach(function (name) {
+                var fnName = el.getAttribute('data-' + name);
+                if (fnName) {
+                    allow([fnName]);
+                }
+            });
+        });
+    }
 
     function resolveArg(arg, el, event) {
         switch (arg) {
@@ -58,9 +82,10 @@
                 if (el.hasAttribute('data-stop')) {
                     event.stopPropagation();
                 }
-                var fn = window[el.getAttribute('data-' + name)];
+                var current = el.getAttribute('data-' + name);
+                var fn = allowed[current] && Object.prototype.hasOwnProperty.call(window, current) ? window[current] : undefined;
                 if (typeof fn !== 'function') {
-                    console.error('No handler named', fnName);
+                    console.error('No handler named', current);
                     return;
                 }
                 var args = readArgs(el, name).map(function (arg) { return resolveArg(arg, el, event); });
@@ -81,8 +106,10 @@
     }
 
     window.bindWebviewHandlers = bindTree;
+    window.allowWebviewHandlers = allow;
 
     function start() {
+        collectAllowed(document.documentElement);
         bindTree(document.documentElement);
         new MutationObserver(function (mutations) {
             mutations.forEach(function (mutation) {
