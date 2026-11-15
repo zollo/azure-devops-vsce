@@ -8,6 +8,7 @@ import { WorkItem } from '../models/workItem';
 import { WorkItemEventManager } from '../events/workItemEventManager';
 import { METADATA_TTL_MS, metadataKey, sharedMetadataCache } from '../utils/metadataCache';
 import { azureDevOps } from '../services/azureDevOpsService';
+import { isOrganizationUrl } from '../utils/workItemUrls';
 
 interface IterationInfo {
     id: string;
@@ -457,6 +458,12 @@ export class WorkItemPanel {
 
             const axiosInstance = this.authenticationManager.getAxiosInstance();
             if (!axiosInstance) return;
+
+            // The request carries the Azure DevOps credentials, so only fetch from the organization
+            if (!isOrganizationUrl(url, this.authenticationManager.getConfig()?.organizationUrl)) {
+                vscode.window.showErrorMessage('This attachment is not on your Azure DevOps organization, so it was not downloaded.');
+                return;
+            }
 
             const response = await axiosInstance.get(url, { responseType: 'arraybuffer' });
 
@@ -1362,16 +1369,6 @@ export class WorkItemPanel {
         return text.replace(/[&<>"']/g, m => map[m]);
     }
 
-    private stripHtml(html: string): string {
-        return html.replace(/<[^>]*>/g, '');
-    }
-
-    private decodeHtml(html: string): string {
-        const map: Record<string, string> = {
-            '&lt;': '<', '&gt;': '>', '&amp;': '&', '&quot;': '"', '&#039;': "'", '&nbsp;': ' '
-        };
-        return html.replace(/&[^;]+;/g, entity => map[entity] || entity);
-    }
 
     private getStateColorForLinked(state: string): string {
         const map: Record<string, string> = {
