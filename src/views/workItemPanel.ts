@@ -10,6 +10,7 @@ import { METADATA_TTL_MS, metadataKey, sharedMetadataCache } from '../utils/meta
 import { azureDevOps } from '../services/azureDevOpsService';
 import { isOrganizationUrl } from '../utils/workItemUrls';
 import { avatarColor, stateColor } from '../utils/stateColors';
+import { WORK_ITEM_VIEW_TYPE } from './panelSerializers';
 
 interface IterationInfo {
     id: string;
@@ -66,7 +67,7 @@ export class WorkItemPanel {
         }
 
         const panel = vscode.window.createWebviewPanel(
-            `workItemDetails-${workItem.id}`,
+            WORK_ITEM_VIEW_TYPE,
             WorkItemPanel.panelTitle(workItem),
             column || vscode.ViewColumn.One,
             {
@@ -76,6 +77,24 @@ export class WorkItemPanel {
             }
         );
 
+        WorkItemPanel.openPanels.set(workItem.id, new WorkItemPanel(panel, extensionUri, authenticationManager, workItem));
+    }
+
+    /** Rebuilds a detail tab VS Code restored after a window reload. */
+    public static revive(
+        panel: vscode.WebviewPanel,
+        extensionUri: vscode.Uri,
+        authenticationManager: AuthenticationManager,
+        workItem: WorkItem
+    ) {
+        const existing = WorkItemPanel.openPanels.get(workItem.id);
+        if (existing) {
+            // Two restored tabs for one item: keep the one already rebuilt
+            panel.dispose();
+            existing._panel.reveal(existing._panel.viewColumn, true);
+            return;
+        }
+        panel.title = WorkItemPanel.panelTitle(workItem);
         WorkItemPanel.openPanels.set(workItem.id, new WorkItemPanel(panel, extensionUri, authenticationManager, workItem));
     }
 
@@ -1017,6 +1036,7 @@ export class WorkItemPanel {
         const workItemJsUri = mediaUri('workItem', 'workItem.js');
         const handlersJsUri = mediaUri('shared', 'webviewHandlers.js');
         const workItemData = {
+            workItemId: this._workItem.id,
             description: description || '',
             acceptanceCriteria: acceptanceCriteria || '',
             existingTags: this._existingTags,

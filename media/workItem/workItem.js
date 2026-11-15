@@ -3,6 +3,8 @@ const WORK_ITEM_DATA = JSON.parse(document.getElementById('work-item-data').text
 // Handlers used only in markup this script builds (tag suggestions)
 allowWebviewHandlers(['selectTag', 'removeTag', 'handleTagInput', 'handleTagKeydown', 'showTagSuggestions', 'hideTagSuggestions']);
 const vscode = acquireVsCodeApi();
+// Record which item this tab shows, so VS Code can reopen it after a window reload
+vscode.setState(Object.assign({}, vscode.getState() || {}, { workItemId: WORK_ITEM_DATA.workItemId }));
 console.log('WorkItem panel script loaded');
 
 function showDescriptionEditor() {

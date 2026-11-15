@@ -10,6 +10,7 @@ import { vendorAssetUri } from '../utils/webviewAssets';
 import { serializeForScript } from '../utils/webviewSecurity';
 import { AVATAR_COLORS, STATE_COLORS } from '../utils/stateColors';
 import { WorkItemEventManager } from '../events/workItemEventManager';
+import { WORK_ITEMS_LIST_VIEW_TYPE } from './panelSerializers';
 import {
     CHECKBOX_COLUMN_WIDTH,
     DEFAULT_WORK_ITEM_COLUMNS,
@@ -54,7 +55,7 @@ export class WorkItemsListPanel {
 
         // Otherwise, create a new panel
         const panel = vscode.window.createWebviewPanel(
-            'workItemsList',
+            WORK_ITEMS_LIST_VIEW_TYPE,
             'Work Items',
             column,
             {
@@ -64,6 +65,12 @@ export class WorkItemsListPanel {
             }
         );
 
+        WorkItemsListPanel.currentPanel = new WorkItemsListPanel(panel, extensionUri, authenticationManager);
+    }
+
+    /** Rebuilds the list in a tab VS Code restored after a window reload; filters and sort come back from the webview state. */
+    public static revive(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, authenticationManager: AuthenticationManager) {
+        WorkItemsListPanel.currentPanel?.dispose();
         WorkItemsListPanel.currentPanel = new WorkItemsListPanel(panel, extensionUri, authenticationManager);
     }
 

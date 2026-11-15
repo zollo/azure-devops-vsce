@@ -18,6 +18,10 @@ import { startConnectionMonitor } from './authentication/connectionMonitorSetup'
 import { OnboardingPanel } from './onboarding/onboardingPanel';
 import { affectsConnectionSettings } from './utils/configChanges';
 import { initAzureDevOpsService } from './services/azureDevOpsService';
+import { registerPanelSerializers } from './views/panelSerializers';
+import { BoardPanel } from './views/boardPanel';
+import { WorkItemsListPanel } from './views/workItemsListPanel';
+import { WorkItemPanel } from './views/workItemPanel';
 
 export let authenticationManager: AuthenticationManager;
 export let workItemProvider: WorkItemProvider;
@@ -204,6 +208,21 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.executeCommand('setContext', 'azureDevOps.connected', false);
         statusBarManager.updateStatus('disconnected');
     }
+
+    // Reopen Board, Work Items and detail tabs restored after a window reload. Registered after
+    // auto-connect so the restored tabs load with the connection in place.
+    context.subscriptions.push(...registerPanelSerializers(context.extensionUri, {
+        board: (panel, boardId, boardName) => BoardPanel.revive(panel, context.extensionUri, authenticationManager, boardId, boardName),
+        workItemsList: panel => WorkItemsListPanel.revive(panel, context.extensionUri, authenticationManager),
+        workItem: async (panel, workItemId) => {
+            const workItem = await workItemProvider.getWorkItemById(workItemId);
+            if (!workItem) {
+                return false;
+            }
+            WorkItemPanel.revive(panel, context.extensionUri, authenticationManager, workItem);
+            return true;
+        }
+    }, message => log.info(message)));
 
     // Watch the connection in the background: refresh expired tokens silently, ask the
     // user to sign in again when that is not possible, and recover after outages.

@@ -9,6 +9,8 @@ function handleSearchKeydown(event, input) {
     }
 }
 const vscode = acquireVsCodeApi();
+// Record which board this tab shows, so VS Code can reopen it after a window reload
+vscode.setState(Object.assign({}, vscode.getState() || {}, { boardId: BOARD_DATA.boardKey, boardName: BOARD_DATA.boardName }));
 const availableBoards = BOARD_DATA.availableBoards;
 let draggedCard = null;
 let originalColumn = null;

@@ -10,6 +10,7 @@ import { OrganizationManager } from '../authentication/organizationManager';
 import { outputChannel } from '../extension';
 import { azureDevOps } from '../services/azureDevOpsService';
 import { sharedMetadataCache } from '../utils/metadataCache';
+import { BOARD_VIEW_TYPE } from './panelSerializers';
 
 /** Stands in for the script nonce while comparing renders; replaced before the HTML is shown. */
 const NONCE_PLACEHOLDER = '__BOARD_NONCE__';
@@ -119,7 +120,7 @@ export class BoardPanel {
 
         // Otherwise, create a new panel
         const panel = vscode.window.createWebviewPanel(
-            'azureDevOpsBoard',
+            BOARD_VIEW_TYPE,
             `Board: ${boardName}`,
             column || vscode.ViewColumn.One,
             {
@@ -129,6 +130,18 @@ export class BoardPanel {
             }
         );
 
+        BoardPanel.currentPanel = new BoardPanel(panel, extensionUri, authenticationManager, boardId, boardName);
+    }
+
+    /** Rebuilds the board in a tab VS Code restored after a window reload. */
+    public static revive(
+        panel: vscode.WebviewPanel,
+        extensionUri: vscode.Uri,
+        authenticationManager: AuthenticationManager,
+        boardId: string,
+        boardName: string
+    ) {
+        BoardPanel.currentPanel?.dispose();
         BoardPanel.currentPanel = new BoardPanel(panel, extensionUri, authenticationManager, boardId, boardName);
     }
 
@@ -2241,7 +2254,8 @@ export class BoardPanel {
         const boardData = {
             availableBoards: this.availableBoards,
             currentIterationPath: this._currentIterationPath || '',
-            boardKey: this.boardId
+            boardKey: this.boardId,
+            boardName: this.boardName
         };
 
         return `<!DOCTYPE html>

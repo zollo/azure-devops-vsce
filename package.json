@@ -23,7 +23,10 @@
     "SCM Providers"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onWebviewPanel:azureDevOpsBoard",
+    "onWebviewPanel:workItemsList",
+    "onWebviewPanel:azureDevOpsWorkItem"
   ],
   "main": "./dist/extension.js",
   "contributes": {
