@@ -11,6 +11,8 @@ export interface WorkItemUpdateEvent {
         oldValue?: any;
         newValue?: any;
     }[];
+    /** The view that made the change, so it can skip its own events. */
+    source?: string;
 }
 
 /**

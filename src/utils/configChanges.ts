@@ -1,8 +1,13 @@
 /**
- * Settings under azureDevOps.* that only change how a view looks. Changing one of them must not
- * re-read the connection settings, which reconnects and can mark an offline session disconnected.
+ * Settings under azureDevOps.* that don't affect the connection, such as how a view looks or how
+ * often it refreshes. Changing one of them must not re-read the connection settings, which
+ * reconnects and can mark an offline session disconnected.
  */
-export const VIEW_ONLY_SETTING_PREFIXES: readonly string[] = ['azureDevOps.workItemsView'];
+export const VIEW_ONLY_SETTING_PREFIXES: readonly string[] = [
+    'azureDevOps.workItemsView',
+    'azureDevOps.autoRefreshInterval',
+    'azureDevOps.showNotifications'
+];
 
 /** The part of vscode.ConfigurationChangeEvent this module needs, so it can be tested without VS Code. */
 export interface ConfigurationChange {

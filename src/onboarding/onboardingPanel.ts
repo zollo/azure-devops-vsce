@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -75,7 +76,7 @@ export class OnboardingPanel {
                 this.panel.title = state.step === 'whatsNew' ? 'What\'s New in ADO Boards' : 'Get Started with ADO Boards';
                 void this.panel.webview.postMessage({ type: 'state', state });
             },
-            log: message => console.log(`[Onboarding] ${message}`)
+            log: message => log.debug(`[Onboarding] ${message}`)
         }, { release: RELEASE_NOTES, startWith: mode });
 
         panel.webview.html = this.getHtml(panel.webview);

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { WorkItem } from '../models/workItem';
 import { SearchService } from '../services/searchService';
 import { AuthenticationManager } from '../authentication/authenticationManager';
@@ -10,6 +11,8 @@ interface WorkItemQuickPickItem extends vscode.QuickPickItem {
 
 export class WorkItemQuickPick {
     private quickPick: vscode.QuickPick<WorkItemQuickPickItem> | undefined;
+    /** Increases with every keystroke; results from an older keystroke are dropped. */
+    private generation = 0;
 
     constructor(
         private authManager: AuthenticationManager,
@@ -31,13 +34,15 @@ export class WorkItemQuickPick {
         this.quickPick.matchOnDetail = true;
 
         // Load recent items initially
-        await this.loadRecentItems();
+        await this.loadRecentItems(this.generation);
 
         // Handle input changes for live search
         this.quickPick.onDidChangeValue(async (value) => {
+            const generation = ++this.generation;
+
             if (!value || value.trim().length === 0) {
                 // Show recent items when input is empty
-                await this.loadRecentItems();
+                await this.loadRecentItems(generation);
                 return;
             }
 
@@ -51,16 +56,17 @@ export class WorkItemQuickPick {
                 if (!trimmedValue.startsWith('#') && !/^\d+$/.test(trimmedValue)) {
                     // Wait a bit for user to finish typing
                     await new Promise(resolve => setTimeout(resolve, 300));
-
-                    // Check if value changed while waiting
-                    if (this.quickPick!.value !== value) {
+                    if (generation !== this.generation) {
                         return;
                     }
                 }
 
-                await this.performSearch(trimmedValue);
+                await this.performSearch(trimmedValue, generation);
             } finally {
-                this.quickPick!.busy = false;
+                // Only the latest search clears the spinner; an older one finishing first must not
+                if (generation === this.generation && this.quickPick) {
+                    this.quickPick.busy = false;
+                }
             }
         });
 
@@ -85,13 +91,14 @@ export class WorkItemQuickPick {
     /**
      * Load and display recent work items
      */
-    private async loadRecentItems(): Promise<void> {
+    private async loadRecentItems(generation: number): Promise<void> {
         if (!this.quickPick) return;
 
         this.quickPick.busy = true;
 
         try {
             const recentItems = await this.searchService.getRecentWorkItems();
+            if (!this.quickPick || generation !== this.generation) return;
 
             if (recentItems.length === 0) {
                 this.quickPick.items = [{
@@ -110,24 +117,29 @@ export class WorkItemQuickPick {
                 ...recentItems.map(item => this.formatWorkItem(item))
             ];
         } catch (error: any) {
-            console.error('[WorkItemQuickPick] Failed to load recent items:', error);
+            log.error('[WorkItemQuickPick] Failed to load recent items:', error);
+            if (!this.quickPick || generation !== this.generation) return;
             this.quickPick.items = [{
                 label: '$(error) Failed to load recent items',
                 description: error?.message || 'Unknown error'
             }];
         } finally {
-            this.quickPick.busy = false;
+            if (this.quickPick && generation === this.generation) {
+                this.quickPick.busy = false;
+            }
         }
     }
 
     /**
      * Perform search and update quick pick items
      */
-    private async performSearch(searchTerm: string): Promise<void> {
+    private async performSearch(searchTerm: string, generation: number): Promise<void> {
         if (!this.quickPick) return;
 
         try {
             const results = await this.searchService.searchWorkItems(searchTerm, 50);
+            // The user kept typing while this search ran; a newer search will fill the list
+            if (!this.quickPick || generation !== this.generation) return;
 
             if (results.length === 0) {
                 this.quickPick.items = [{
@@ -152,7 +164,8 @@ export class WorkItemQuickPick {
                 ...results.map(item => this.formatWorkItem(item))
             ];
         } catch (error: any) {
-            console.error('[WorkItemQuickPick] Search failed:', error);
+            log.error('[WorkItemQuickPick] Search failed:', error);
+            if (!this.quickPick || generation !== this.generation) return;
             this.quickPick.items = [{
                 label: '$(error) Search failed',
                 description: error?.message || 'Unknown error'

@@ -13,13 +13,16 @@
     /** UI-only state that survives re-renders. */
     const ui = { showTenantInput: false, showOrgInput: false, teamFilter: '' };
 
+    const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+    const QUICK_OPEN_KEYS = isMac ? '\u2325\u21e7\u2318O' : 'Ctrl+Alt+Shift+O';
+
     const FEATURES = [
         ['checklist', 'Work items', 'Browse, create and edit work items in the sidebar or a full editor.'],
         ['project', 'Kanban boards', 'Drag cards across columns on your team board.'],
         ['calendar', 'Sprints and backlogs', 'See the current sprint, capacity and backlog levels.'],
         ['search', 'Queries and search', 'Run saved queries and search work items.'],
         ['git-branch', 'Git integration', 'Create branches from work items and link commits.'],
-        ['zap', 'Quick open', 'Jump to any work item with Ctrl+Shift+O.']
+        ['zap', 'Quick open', `Jump to any work item with ${QUICK_OPEN_KEYS}.`]
     ];
 
     const send = (/** @type {any} */ message) => vscode.postMessage(message);

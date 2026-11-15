@@ -1,9 +1,13 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
+import { notifyBulkResult, notifySuccess } from '../utils/notify';
+import { mapWithConcurrency } from '../utils/workItemBatches';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem } from '../models/workItem';
 import { CacheManager } from '../utils/cacheManager';
 import { vendorAssetUri } from '../utils/webviewAssets';
 import { serializeForScript } from '../utils/webviewSecurity';
+import { WorkItemEventManager } from '../events/workItemEventManager';
 import {
     CHECKBOX_COLUMN_WIDTH,
     DEFAULT_WORK_ITEM_COLUMNS,
@@ -82,6 +86,13 @@ export class WorkItemsListPanel {
             }
         }, null, this._disposables);
 
+        // Keep rows in step with edits made in other views (board, details, sidebar)
+        WorkItemEventManager.getInstance().onWorkItemUpdated(event => {
+            if (event.source !== WorkItemsListPanel.EVENT_SOURCE) {
+                void this._refreshRows([event.workItemId], event.updateType === 'delete');
+            }
+        }, null, this._disposables);
+
         // Load and render work items
         this._loadAndRender();
 
@@ -145,6 +156,77 @@ export class WorkItemsListPanel {
 
     public async refresh() {
         await this._loadAndRender();
+    }
+
+    private static readonly EVENT_SOURCE = 'workItemsList';
+    private static readonly LIST_FIELDS = 'System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.AreaPath,System.IterationPath,System.Tags,Microsoft.VSTS.Common.Priority,System.ChangedDate,System.CreatedDate,System.CommentCount';
+
+    private _rowContext() {
+        return {
+            typeIconHtml: (type: string) => this._getWorkItemTypeIcon(type),
+            avatarHtml: (displayName: string, initials: string) => this._getAvatarHtml(displayName, initials)
+        };
+    }
+
+    /**
+     * Re-renders only the given rows in the open page (or removes them), so an edit keeps the
+     * person's filters, selection and scroll position. Other views are told about the change.
+     */
+    private _afterEdit(ids: number[], updateType: 'update' | 'state-change' | 'assign' | 'delete' = 'update'): void {
+        if (updateType === 'delete') {
+            void this._panel.webview.postMessage({ command: 'removeRows', ids });
+        } else {
+            this._postRows(ids);
+        }
+        const events = WorkItemEventManager.getInstance();
+        for (const id of ids) {
+            events.notifyWorkItemUpdated({ workItemId: id, updateType, source: WorkItemsListPanel.EVENT_SOURCE });
+        }
+    }
+
+    private _postRows(ids: number[]): void {
+        const context = this._rowContext();
+        const wanted = new Set(ids);
+        const rows = this.workItems
+            .filter(wi => wanted.has(wi.id))
+            .map(wi => ({ id: wi.id, html: renderWorkItemRow(wi, context) }));
+        if (rows.length > 0) {
+            void this._panel.webview.postMessage({ command: 'updateRows', rows });
+        }
+    }
+
+    /** Reloads rows that changed elsewhere. Items not in this list are ignored. */
+    private async _refreshRows(ids: number[], deleted: boolean): Promise<void> {
+        const shown = ids.filter(id => this.workItems.some(wi => wi.id === id));
+        if (shown.length === 0) {
+            return;
+        }
+        if (deleted) {
+            this.workItems = this.workItems.filter(wi => !shown.includes(wi.id));
+            void this._panel.webview.postMessage({ command: 'removeRows', ids: shown });
+            return;
+        }
+        const axiosInstance = this.authenticationManager.getAxiosInstance();
+        if (!axiosInstance) {
+            return;
+        }
+        try {
+            const response = await axiosInstance.get('/_apis/wit/workitems', {
+                params: { ids: shown.join(','), fields: WorkItemsListPanel.LIST_FIELDS, errorPolicy: 'omit' }
+            });
+            const fresh: WorkItem[] = (response.data.value || []).filter((item: any) => item);
+            const freshIds = new Set(fresh.map(item => item.id));
+            this.workItems = this.workItems
+                .filter(wi => !shown.includes(wi.id) || freshIds.has(wi.id))
+                .map(wi => fresh.find(item => item.id === wi.id) ?? wi);
+            const gone = shown.filter(id => !freshIds.has(id));
+            if (gone.length > 0) {
+                void this._panel.webview.postMessage({ command: 'removeRows', ids: gone });
+            }
+            this._postRows([...freshIds]);
+        } catch (error) {
+            log.error('[WorkItemsList] Failed to refresh changed rows:', error);
+        }
     }
 
     private static _readColumnsSetting(): WorkItemColumnId[] {
@@ -217,8 +299,8 @@ export class WorkItemsListPanel {
                 updatedItem.fields['System.State'] = selected.label;
             }
 
-            this._panel.webview.html = this._getHtmlForWebview();
-            vscode.window.showInformationMessage(`Updated state for #${workItemId}`);
+            this._afterEdit([workItemId], 'state-change');
+            notifySuccess(`Updated state for #${workItemId}`);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to update state: ${error?.message || error}`);
         }
@@ -262,7 +344,7 @@ export class WorkItemsListPanel {
 
             return result;
         } catch (error) {
-            console.error('Failed to load available states:', error);
+            log.error('Failed to load available states:', error);
             // Fallback to common states if API call fails
             return ['New', 'Active', 'Resolved', 'Closed'];
         }
@@ -320,8 +402,8 @@ export class WorkItemsListPanel {
                 }
             }
 
-            this._panel.webview.html = this._getHtmlForWebview();
-            vscode.window.showInformationMessage(`Updated assignee for #${workItemId}`);
+            this._afterEdit([workItemId], 'assign');
+            notifySuccess(`Updated assignee for #${workItemId}`);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to update assignee: ${error?.message || error}`);
         }
@@ -345,8 +427,7 @@ export class WorkItemsListPanel {
                 throw new Error('Not connected');
             }
 
-            // Update all work items in parallel
-            await Promise.all(workItemIds.map(id =>
+            const { succeeded, failed } = await WorkItemsListPanel._runBulk(workItemIds, id =>
                 axiosInstance.patch(
                     `/_apis/wit/workitems/${id}`,
                     [{
@@ -359,21 +440,41 @@ export class WorkItemsListPanel {
                         headers: { 'Content-Type': 'application/json-patch+json' }
                     }
                 )
-            ));
+            );
 
             // Update local state instead of full reload
-            workItemIds.forEach(id => {
+            succeeded.forEach(id => {
                 const item = this.workItems.find(wi => wi.id === id);
                 if (item) {
                     item.fields['System.State'] = selected.label;
                 }
             });
 
-            this._panel.webview.html = this._getHtmlForWebview();
-            vscode.window.showInformationMessage(`Updated state for ${workItemIds.length} work items`);
+            this._afterEdit(succeeded, 'state-change');
+            notifyBulkResult(`Updated state for ${succeeded.length} work items`, failed.length);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to bulk update state: ${error?.message || error}`);
         }
+    }
+
+    /**
+     * Runs one request per work item, 5 at a time so large selections don't trip Azure DevOps
+     * rate limits, and reports which items succeeded instead of failing the whole batch.
+     */
+    private static async _runBulk(ids: number[], request: (id: number) => Promise<unknown>): Promise<{ succeeded: number[]; failed: number[] }> {
+        const outcomes = await mapWithConcurrency(ids, 5, async id => {
+            try {
+                await request(id);
+                return true;
+            } catch (error) {
+                log.error(`Bulk update failed for #${id}:`, error);
+                return false;
+            }
+        });
+        return {
+            succeeded: ids.filter((_, i) => outcomes[i]),
+            failed: ids.filter((_, i) => !outcomes[i])
+        };
     }
 
     private async _bulkChangeAssignee(workItemIds: number[]) {
@@ -405,8 +506,7 @@ export class WorkItemsListPanel {
                 ? { op: 'replace', path: '/fields/System.AssignedTo', value: selected.uniqueName }
                 : { op: 'remove', path: '/fields/System.AssignedTo' };
 
-            // Update all work items in parallel
-            await Promise.all(workItemIds.map(id =>
+            const { succeeded, failed } = await WorkItemsListPanel._runBulk(workItemIds, id =>
                 axiosInstance.patch(
                     `/_apis/wit/workitems/${id}`,
                     [patchOp],
@@ -415,10 +515,10 @@ export class WorkItemsListPanel {
                         headers: { 'Content-Type': 'application/json-patch+json' }
                     }
                 )
-            ));
+            );
 
             // Update local state instead of full reload
-            workItemIds.forEach(id => {
+            succeeded.forEach(id => {
                 const item = this.workItems.find(wi => wi.id === id);
                 if (item) {
                     if (selected.uniqueName) {
@@ -432,8 +532,8 @@ export class WorkItemsListPanel {
                 }
             });
 
-            this._panel.webview.html = this._getHtmlForWebview();
-            vscode.window.showInformationMessage(`Updated assignee for ${workItemIds.length} work items`);
+            this._afterEdit(succeeded, 'assign');
+            notifyBulkResult(`Updated assignee for ${succeeded.length} work items`, failed.length);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to bulk update assignee: ${error?.message || error}`);
         }
@@ -456,18 +556,18 @@ export class WorkItemsListPanel {
                 throw new Error('Not connected');
             }
 
-            // Delete all work items in parallel
-            await Promise.all(workItemIds.map(id =>
+            const { succeeded, failed } = await WorkItemsListPanel._runBulk(workItemIds, id =>
                 axiosInstance.delete(
                     `/_apis/wit/workitems/${id}`,
                     { params: { 'api-version': '7.1' } }
                 )
-            ));
+            );
 
             // Remove from local state instead of full reload
-            this.workItems = this.workItems.filter(wi => !workItemIds.includes(wi.id));
-            this._panel.webview.html = this._getHtmlForWebview();
-            vscode.window.showInformationMessage(`Deleted ${workItemIds.length} work items`);
+            const deleted = new Set(succeeded);
+            this.workItems = this.workItems.filter(wi => !deleted.has(wi.id));
+            this._afterEdit(succeeded, 'delete');
+            notifyBulkResult(`Deleted ${succeeded.length} work items`, failed.length);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to delete work items: ${error?.message || error}`);
         }
@@ -501,10 +601,12 @@ export class WorkItemsListPanel {
                 titleItem.fields['System.Title'] = newTitle;
             }
 
-            this._panel.webview.html = this._getHtmlForWebview();
-            vscode.window.showInformationMessage(`Updated title for #${workItemId}`);
+            this._afterEdit([workItemId]);
+            notifySuccess(`Updated title for #${workItemId}`);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to update title: ${error?.message || error}`);
+            // Put the saved title back in the row
+            this._postRows([workItemId]);
         }
     }
 
@@ -544,7 +646,7 @@ export class WorkItemsListPanel {
 
                     teamMembers.forEach((m: {displayName: string, uniqueName: string}) => memberSet.set(m.uniqueName, m));
                 } catch (teamError) {
-                    console.error('Failed to load team members:', teamError);
+                    log.error('Failed to load team members:', teamError);
                 }
             }
 
@@ -576,7 +678,7 @@ export class WorkItemsListPanel {
                     additionalMembers.forEach((m: {displayName: string, uniqueName: string}) => memberSet.set(m.uniqueName, m));
                 });
             } catch (projectError) {
-                console.error('Failed to load project users:', projectError);
+                log.error('Failed to load project users:', projectError);
             }
 
             const members = Array.from(memberSet.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
@@ -586,7 +688,7 @@ export class WorkItemsListPanel {
 
             return members;
         } catch (error) {
-            console.error('Failed to get team members:', error);
+            log.error('Failed to get team members:', error);
             return [];
         }
     }
@@ -613,7 +715,8 @@ export class WorkItemsListPanel {
 
             const response = await axiosInstance.post(
                 `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql`,
-                { query: wiql }
+                { query: wiql },
+                { params: { '$top': maxItems } }
             );
 
             const workItemRefs = response.data.workItems || [];
@@ -645,12 +748,12 @@ export class WorkItemsListPanel {
                         const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
                             params: {
                                 'ids': batch.join(','),
-                                'fields': 'System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.AreaPath,System.IterationPath,System.Tags,Microsoft.VSTS.Common.Priority,System.ChangedDate,System.CreatedDate,System.CommentCount'
+                                'fields': WorkItemsListPanel.LIST_FIELDS
                             }
                         });
                         return detailsResponse.data.value || [];
                     } catch (error: any) {
-                        console.error(`Failed to load work items batch:`, error?.message || error);
+                        log.error(`Failed to load work items batch:`, error?.message || error);
                         return [];
                     }
                 });
@@ -661,7 +764,7 @@ export class WorkItemsListPanel {
 
             this.workItems = allWorkItems;
         } catch (error: any) {
-            console.error('Failed to load work items:', error?.message || error);
+            log.error('Failed to load work items:', error?.message || error);
             this.workItems = [];
         }
     }
@@ -715,10 +818,7 @@ export class WorkItemsListPanel {
             .filter(c => !visibleColumns.includes(c.id))
             .map(c => `hide-col-${c.id}`)
             .join(' ');
-        const rowContext = {
-            typeIconHtml: (type: string) => this._getWorkItemTypeIcon(type),
-            avatarHtml: (displayName: string, initials: string) => this._getAvatarHtml(displayName, initials)
-        };
+        const rowContext = this._rowContext();
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -1481,10 +1581,131 @@ export class WorkItemsListPanel {
 
             window.addEventListener('message', event => {
                 const message = event.data;
-                if (message && message.command === 'setColumns' && Array.isArray(message.columns)) {
+                if (!message) return;
+                if (message.command === 'setColumns' && Array.isArray(message.columns)) {
                     setColumns(message.columns, false);
+                } else if (message.command === 'updateRows' && Array.isArray(message.rows)) {
+                    updateRows(message.rows);
+                } else if (message.command === 'removeRows' && Array.isArray(message.ids)) {
+                    removeRows(message.ids);
                 }
             });
+
+            // Replace edited rows in place so filters, selection and scroll stay as they are
+            function updateRows(rows) {
+                const tbody = document.querySelector('#workItemsTable tbody');
+                if (!tbody) return;
+                rows.forEach(update => {
+                    const template = document.createElement('template');
+                    template.innerHTML = String(update.html).trim();
+                    const fresh = template.content.firstElementChild;
+                    if (!fresh) return;
+                    const existing = tbody.querySelector('tr[data-id="' + Number(update.id) + '"]');
+                    if (existing) {
+                        existing.replaceWith(fresh);
+                    } else {
+                        tbody.prepend(fresh);
+                    }
+                    if (selectedIds.has(Number(update.id))) {
+                        fresh.classList.add('selected');
+                        const cb = fresh.querySelector('.row-checkbox');
+                        if (cb) cb.checked = true;
+                    }
+                    bindRow(fresh);
+                });
+                applyAvatarColors();
+                syncFilterOptions();
+                applyFilters();
+            }
+
+            function removeRows(ids) {
+                ids.forEach(id => {
+                    selectedIds.delete(Number(id));
+                    const row = document.querySelector('#workItemsTable tbody tr[data-id="' + Number(id) + '"]');
+                    if (row) row.remove();
+                });
+                updateBulkActionsVisibility();
+                syncFilterOptions();
+                applyFilters();
+            }
+
+            // Keep each filter's options in step with the rows: add values that appeared after an
+            // edit, and drop unchecked values no row has any more. Checked values always stay.
+            function syncFilterOptions() {
+                const rows = Array.from(document.querySelectorAll('#workItemsTable tbody tr'));
+                const valuesOf = {
+                    type: row => [row.dataset.type || ''],
+                    state: row => [row.dataset.state || ''],
+                    assignee: row => [row.dataset.assignee || ''],
+                    area: row => [row.dataset.area || ''],
+                    tags: row => (row.dataset.tags || '').split(';').map(t => t.trim())
+                };
+                Object.keys(valuesOf).forEach(name => {
+                    const container = document.getElementById(name + 'DropdownContent');
+                    if (!container) return;
+                    const present = new Set();
+                    rows.forEach(row => valuesOf[name](row).forEach(v => { if (v) present.add(v); }));
+                    const existing = new Map();
+                    container.querySelectorAll('input[type="checkbox"][name="' + name + '"]').forEach(cb => {
+                        existing.set(cb.value, cb);
+                    });
+                    existing.forEach((cb, value) => {
+                        if (!present.has(value) && !cb.checked) {
+                            const label = cb.closest('label');
+                            if (label) label.remove();
+                        }
+                    });
+                    const divider = container.querySelector('.filter-divider');
+                    Array.from(present).sort((a, b) => a.localeCompare(b)).forEach(value => {
+                        if (existing.has(value)) return;
+                        const label = document.createElement('label');
+                        label.className = 'filter-checkbox-item';
+                        const cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.name = name;
+                        cb.value = value;
+                        cb.addEventListener('change', function() {
+                            handleFilterChange(name, this);
+                        });
+                        label.appendChild(cb);
+                        label.appendChild(document.createTextNode(' ' + value));
+                        container.insertBefore(label, divider);
+                    });
+                });
+            }
+
+            // Filters are kept in the webview state, so they survive a refresh or reload of the page
+            function saveFilterState() {
+                const keywordEl = document.getElementById('keywordFilter');
+                const filters = {};
+                ['type', 'state', 'assignee', 'area', 'tags'].forEach(name => {
+                    filters[name] = getSelectedFilters(name);
+                });
+                const previous = vscode.getState() || {};
+                vscode.setState(Object.assign({}, previous, {
+                    keyword: keywordEl ? keywordEl.value : '',
+                    filters: filters
+                }));
+            }
+
+            function restoreFilterState() {
+                const saved = vscode.getState();
+                if (!saved) return;
+                const keywordEl = document.getElementById('keywordFilter');
+                if (keywordEl && typeof saved.keyword === 'string') {
+                    keywordEl.value = saved.keyword;
+                }
+                const filters = saved.filters || {};
+                ['type', 'state', 'assignee', 'area', 'tags'].forEach(name => {
+                    const wanted = Array.isArray(filters[name]) ? filters[name] : [];
+                    const container = document.getElementById(name + 'DropdownContent');
+                    if (!container) return;
+                    container.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                        cb.checked = wanted.includes(cb.value);
+                    });
+                    updateDropdownButton(name);
+                });
+            }
 
             // Avatar color utility - generates consistent colors based on display name
             function getAvatarColor(displayName) {
@@ -1666,6 +1887,64 @@ export class WorkItemsListPanel {
 
                 updateSelectAllCheckbox();
                 scheduleFitTags();
+                saveFilterState();
+            }
+
+            // Wires up one row's checkbox, cells and buttons; used on load and for rows replaced after an edit
+            function bindRow(row) {
+                const id = parseInt(row.dataset.id);
+
+                const cb = row.querySelector('.row-checkbox');
+                if (cb) {
+                    cb.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                    });
+                    cb.addEventListener('change', function() {
+                        if (this.checked) {
+                            selectedIds.add(id);
+                            row.classList.add('selected');
+                        } else {
+                            selectedIds.delete(id);
+                            row.classList.remove('selected');
+                        }
+                        updateBulkActionsVisibility();
+                        updateSelectAllCheckbox();
+                    });
+                }
+
+                // Clickable cells (open work item)
+                row.querySelectorAll('.clickable-cell').forEach(cell => {
+                    cell.addEventListener('click', function() {
+                        openWorkItem(id);
+                    });
+                });
+
+                // Title cells (double click to edit, single click to open)
+                row.querySelectorAll('.title-cell').forEach(cell => {
+                    cell.addEventListener('click', function() {
+                        openWorkItem(id);
+                    });
+                    cell.addEventListener('dblclick', function(e) {
+                        e.stopPropagation();
+                        editTitle(id, this);
+                    });
+                });
+
+                const stateBtn = row.querySelector('.change-state-btn');
+                if (stateBtn) {
+                    stateBtn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        vscode.postMessage({ command: 'changeState', id: id });
+                    });
+                }
+
+                const assigneeBtn = row.querySelector('.change-assignee-btn');
+                if (assigneeBtn) {
+                    assigneeBtn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        vscode.postMessage({ command: 'changeAssignee', id: id });
+                    });
+                }
             }
 
             function editTitle(id, cell) {
@@ -1904,73 +2183,12 @@ export class WorkItemsListPanel {
                     });
                 }
 
-                // Row checkboxes
-                document.querySelectorAll('.row-checkbox').forEach(cb => {
-                    cb.addEventListener('click', function(e) {
-                        e.stopPropagation();
-                    });
-                    cb.addEventListener('change', function() {
-                        const id = parseInt(this.dataset.id);
-                        const row = this.closest('tr');
-                        if (this.checked) {
-                            selectedIds.add(id);
-                            if (row) row.classList.add('selected');
-                        } else {
-                            selectedIds.delete(id);
-                            if (row) row.classList.remove('selected');
-                        }
-                        updateBulkActionsVisibility();
-                        updateSelectAllCheckbox();
-                    });
-                });
+                // Row interactions
+                document.querySelectorAll('#workItemsTable tbody tr').forEach(bindRow);
 
-                // Clickable cells (open work item)
-                document.querySelectorAll('.clickable-cell').forEach(cell => {
-                    cell.addEventListener('click', function() {
-                        const row = this.closest('tr');
-                        if (row) {
-                            const id = parseInt(row.dataset.id);
-                            openWorkItem(id);
-                        }
-                    });
-                });
-
-                // Title cells (double click to edit, single click to open)
-                document.querySelectorAll('.title-cell').forEach(cell => {
-                    cell.addEventListener('click', function() {
-                        const row = this.closest('tr');
-                        if (row) {
-                            const id = parseInt(row.dataset.id);
-                            openWorkItem(id);
-                        }
-                    });
-                    cell.addEventListener('dblclick', function(e) {
-                        e.stopPropagation();
-                        const row = this.closest('tr');
-                        if (row) {
-                            const id = parseInt(row.dataset.id);
-                            editTitle(id, this);
-                        }
-                    });
-                });
-
-                // Change state buttons
-                document.querySelectorAll('.change-state-btn').forEach(btn => {
-                    btn.addEventListener('click', function(e) {
-                        e.stopPropagation();
-                        const id = parseInt(this.dataset.id);
-                        vscode.postMessage({ command: 'changeState', id: id });
-                    });
-                });
-
-                // Change assignee buttons
-                document.querySelectorAll('.change-assignee-btn').forEach(btn => {
-                    btn.addEventListener('click', function(e) {
-                        e.stopPropagation();
-                        const id = parseInt(this.dataset.id);
-                        vscode.postMessage({ command: 'changeAssignee', id: id });
-                    });
-                });
+                // Bring back the filters from before a refresh or reload
+                restoreFilterState();
+                applyFilters();
             }
         })();
     </script>

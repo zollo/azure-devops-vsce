@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from './logger';
 import { WorkItem } from '../models/workItem';
 import { ActiveWorkItemService } from '../services/activeWorkItemService';
 
@@ -93,7 +94,7 @@ export class StatusBarManager {
                 // Legacy support - redirects to activeWorkItemService
                 if (workItemId && this.activeWorkItemService) {
                     // Fetch and set as active
-                    console.log('[StatusBarManager] Legacy working mode - use activeWorkItemService instead');
+                    log.debug('[StatusBarManager] Legacy working mode - use activeWorkItemService instead');
                 }
                 break;
         }

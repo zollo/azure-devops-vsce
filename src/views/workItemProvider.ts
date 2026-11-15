@@ -1,8 +1,13 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
+import { notifySuccess } from '../utils/notify';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem, WorkItemTypeEnum, WorkItemStateEnum } from '../models/workItem';
 import { CacheManager } from '../utils/cacheManager';
 import { WorkItemEventManager } from '../events/workItemEventManager';
+import { METADATA_TTL_MS, metadataKey, sharedMetadataCache } from '../utils/metadataCache';
+import { fetchWorkItemsInBatches } from '../utils/workItemBatches';
+import { applyLoadError, describeLoadError } from './loadErrors';
 
 export type GroupByOption = 'type' | 'state' | 'assignedTo' | 'sprint' | 'none';
 
@@ -27,14 +32,23 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
     private cacheManager: CacheManager = new CacheManager();
     private eventManager = WorkItemEventManager.getInstance();
     private stateCategoryCache: Map<string, string> = new Map(); // Maps "workItemType:state" -> "category"
+    private loadError: unknown;
+    private eventRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 
     constructor(context: vscode.ExtensionContext, authenticationManager: AuthenticationManager) {
         this.context = context;
         this.authenticationManager = authenticationManager;
 
-        // Subscribe to work item update events from other views
+        // Subscribe to work item update events from other views. A bulk edit sends one event
+        // per item, so reload once after they stop arriving instead of once per item.
         this.eventManager.onWorkItemUpdated(() => {
-            this.forceRefresh();
+            if (this.eventRefreshTimer) {
+                clearTimeout(this.eventRefreshTimer);
+            }
+            this.eventRefreshTimer = setTimeout(() => {
+                this.eventRefreshTimer = undefined;
+                this.forceRefresh();
+            }, 300);
         });
     }
 
@@ -140,6 +154,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
     }
 
     private async loadWorkItems(): Promise<void> {
+        this.loadError = undefined;
         if (!this.authenticationManager.isConnected()) {
             this.workItems = [];
             return;
@@ -191,15 +206,17 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             wiql += ` ORDER BY [System.ChangedDate] DESC`;
 
             try {
-                console.log('[WorkItemProvider] WIQL Query:', wiql);
-                console.log('[WorkItemProvider] Filters - State:', this.filterState, 'Type:', this.filterType, 'AssignedToMe:', this.filterAssignedToMe);
+                log.debug('[WorkItemProvider] WIQL Query:', wiql);
+                log.debug('[WorkItemProvider] Filters - State:', this.filterState, 'Type:', this.filterType, 'AssignedToMe:', this.filterAssignedToMe);
             } catch (e) {
                 // Ignore console logging errors
             }
 
+            // $top stops Azure DevOps returning thousands of ids when only maxItems are shown
             const response = await axiosInstance.post(
                 `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql`,
-                { query: wiql }
+                { query: wiql },
+                { params: { '$top': maxItems } }
             );
 
             const workItemRefs = response.data.workItems || [];
@@ -211,41 +228,30 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             // Get detailed work item information (limit to maxItems)
             const workItemIdsToLoad = workItemRefs.slice(0, maxItems).map((item: any) => item.id);
 
-            // Load in batches of 200 (Azure DevOps API limit) with limited concurrency
-            const BATCH_SIZE = 200;
-            const MAX_CONCURRENT_BATCHES = 3;
-            const batches: number[][] = [];
-
-            for (let i = 0; i < workItemIdsToLoad.length; i += BATCH_SIZE) {
-                batches.push(workItemIdsToLoad.slice(i, i + BATCH_SIZE));
+            let batchError: unknown;
+            // Load in batches of 200 (Azure DevOps API limit), 3 at a time. Relations are
+            // needed to show which items have children; links and other expansions are not.
+            this.workItems = await fetchWorkItemsInBatches<any>(
+                workItemIdsToLoad,
+                async batch => {
+                    const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
+                        params: {
+                            'ids': batch.join(','),
+                            '$expand': 'relations',
+                            'errorPolicy': 'omit'
+                        }
+                    });
+                    return (detailsResponse.data.value || []).filter((item: any) => item);
+                },
+                (error: any) => {
+                    log.error('Failed to load work items batch:', error?.message || error);
+                    batchError = batchError ?? error;
+                }
+            );
+            // Every batch failed: report it rather than showing an empty list
+            if (this.workItems.length === 0 && batchError) {
+                throw batchError;
             }
-
-            const allWorkItems: any[] = [];
-
-            // Process batches in groups of MAX_CONCURRENT_BATCHES
-            for (let i = 0; i < batches.length; i += MAX_CONCURRENT_BATCHES) {
-                const batchGroup = batches.slice(i, i + MAX_CONCURRENT_BATCHES);
-
-                const batchPromises = batchGroup.map(async (batch) => {
-                    try {
-                        const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
-                            params: {
-                                'ids': batch.join(','),
-                                '$expand': 'all'
-                            }
-                        });
-                        return detailsResponse.data.value || [];
-                    } catch (error: any) {
-                        console.error(`Failed to load work items batch:`, error?.message || error);
-                        return [];
-                    }
-                });
-
-                const batchResults = await Promise.all(batchPromises);
-                allWorkItems.push(...batchResults.flat());
-            }
-
-            this.workItems = allWorkItems;
 
             // Prefetch state categories for all unique work item types
             await this.prefetchStateCategoriesForWorkItems();
@@ -253,8 +259,9 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             // Cache the results
             this.cacheManager.set(cacheKey, this.workItems);
         } catch (error: any) {
-            console.error('Failed to load work items:', error?.message || error);
+            log.error('Failed to load work items:', error?.message || error);
             this.workItems = [];
+            this.loadError = error;
         }
     }
 
@@ -265,15 +272,23 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
     async getChildren(element?: WorkItemTreeItem): Promise<WorkItemTreeItem[]> {
         try {
             if (!this.authenticationManager.isConnected()) {
-                console.log('[WorkItemProvider] Not connected to Azure DevOps');
+                log.debug('[WorkItemProvider] Not connected to Azure DevOps');
                 return [];
             }
 
             if (!element) {
-                console.log('[WorkItemProvider] Loading root work items...');
+                log.debug('[WorkItemProvider] Loading root work items...');
                 await this.loadWorkItems();
 
-                console.log('[WorkItemProvider] Loaded', this.workItems.length, 'work items');
+                log.debug('[WorkItemProvider] Loaded', this.workItems.length, 'work items');
+
+                if (this.loadError) {
+                    return [applyLoadError(
+                        new WorkItemTreeItem('', vscode.TreeItemCollapsibleState.None),
+                        describeLoadError(this.loadError, 'work items'),
+                        'azureDevOps.refreshWorkItems'
+                    )];
+                }
 
                 if (this.workItems.length === 0) {
                     return [new WorkItemTreeItem('No work items found', vscode.TreeItemCollapsibleState.None)];
@@ -281,7 +296,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
 
                 // Group based on selected option
                 const grouped = this.groupWorkItems();
-                console.log('[WorkItemProvider] Created', grouped.length, 'groups');
+                log.debug('[WorkItemProvider] Created', grouped.length, 'groups');
                 return grouped;
             } else if (element.contextValue === 'workItemGroup') {
             // Show work items in this group
@@ -324,7 +339,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
 
             return [];
         } catch (error: any) {
-            console.error('[WorkItemProvider] Error in getChildren:', error);
+            log.error('[WorkItemProvider] Error in getChildren:', error);
             return [new WorkItemTreeItem(`Error: ${error?.message || error}`, vscode.TreeItemCollapsibleState.None)];
         }
     }
@@ -454,11 +469,12 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
 
             if (childIds.length === 0) return [];
 
-            const childResponse = await axiosInstance.get('/_apis/wit/workitems', {
-                params: { 'ids': childIds.join(','), '$expand': 'relations', 'api-version': '7.0' }
+            const children = await fetchWorkItemsInBatches<any>(childIds, async batch => {
+                const childResponse = await axiosInstance.get('/_apis/wit/workitems', {
+                    params: { 'ids': batch.join(','), '$expand': 'relations', 'errorPolicy': 'omit', 'api-version': '7.0' }
+                });
+                return (childResponse.data.value || []).filter((item: any) => item);
             });
-
-            const children = childResponse.data.value || [];
             return children.map((child: any) => {
                 const title = child.fields['System.Title'];
                 const state = child.fields['System.State'];
@@ -486,7 +502,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                 return treeItem;
             });
         } catch (error) {
-            console.error('Failed to load child work items:', error);
+            log.error('Failed to load child work items:', error);
             return [];
         }
     }
@@ -550,12 +566,20 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             }
         });
 
-        // Fetch state categories for each unique type
-        const fetchPromises = Array.from(uniqueTypes).map(type =>
-            this.fetchStateCategoriesForType(type)
-        );
-
-        await Promise.all(fetchPromises);
+        // Fetch state categories for each unique type; types already known come from the shared cache
+        const config = this.authenticationManager.getConfig();
+        await Promise.all(Array.from(uniqueTypes).map(async type => {
+            try {
+                const categories = await sharedMetadataCache.getOrLoad(
+                    metadataKey('state-categories', config?.organizationUrl, config?.defaultProject, type),
+                    METADATA_TTL_MS,
+                    () => this.fetchStateCategoriesForType(type)
+                );
+                categories.forEach((category, stateName) => this.stateCategoryCache.set(`${type}:${stateName}`, category));
+            } catch {
+                // Fall back to matching state names
+            }
+        }));
     }
 
     /**
@@ -565,36 +589,31 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
     private async fetchStateCategoriesForType(workItemType: string): Promise<Map<string, string>> {
         const stateCategories = new Map<string, string>();
 
-        try {
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            const config = this.authenticationManager.getConfig();
+        // Errors propagate so a failed lookup isn't cached; icons fall back to state names meanwhile
+        const axiosInstance = this.authenticationManager.getAxiosInstance();
+        const config = this.authenticationManager.getConfig();
 
-            if (!axiosInstance || !config?.defaultProject) {
-                return stateCategories;
-            }
+        if (!axiosInstance || !config?.defaultProject) {
+            return stateCategories;
+        }
 
-            const response = await axiosInstance.get(
-                `/${encodeURIComponent(config.defaultProject)}/_apis/wit/workitemtypes/${encodeURIComponent(workItemType)}/states`,
-                {
-                    params: {
-                        'api-version': '7.1'
-                    }
+        const response = await axiosInstance.get(
+            `/${encodeURIComponent(config.defaultProject)}/_apis/wit/workitemtypes/${encodeURIComponent(workItemType)}/states`,
+            {
+                params: {
+                    'api-version': '7.1'
                 }
-            );
-
-            if (response.data && response.data.value) {
-                response.data.value.forEach((stateInfo: any) => {
-                    if (stateInfo.name && stateInfo.category) {
-                        const stateName = stateInfo.name.toLowerCase();
-                        const category = stateInfo.category;
-                        stateCategories.set(stateName, category);
-                        // Cache it globally with workItemType:state key
-                        this.stateCategoryCache.set(`${workItemType}:${stateName}`, category);
-                    }
-                });
             }
-        } catch (error) {
-            // Silently fail - will use fallback logic
+        );
+
+        if (response.data && response.data.value) {
+            response.data.value.forEach((stateInfo: any) => {
+                if (stateInfo.name && stateInfo.category) {
+                    const stateName = stateInfo.name.toLowerCase();
+                    const category = stateInfo.category;
+                    stateCategories.set(stateName, category);
+                }
+            });
         }
 
         return stateCategories;
@@ -714,7 +733,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             });
             return response.data;
         } catch (error) {
-            console.error(`Failed to get work item ${id}:`, error);
+            log.error(`Failed to get work item ${id}:`, error);
             return null;
         }
     }
@@ -762,7 +781,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             this.refresh();
             return response.data;
         } catch (error) {
-            console.error('Failed to create work item:', error);
+            log.error('Failed to create work item:', error);
             vscode.window.showErrorMessage(`Failed to create work item: ${error}`);
             return null;
         }
@@ -823,7 +842,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
 
             return false;
         } catch (error) {
-            console.error(`Failed to update work item ${id}:`, error);
+            log.error(`Failed to update work item ${id}:`, error);
             return false;
         }
     }
@@ -914,7 +933,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                             fieldValue = iteration.path;
                         }
                     } catch (e) {
-                        console.error('Failed to get iteration path:', e);
+                        log.error('Failed to get iteration path:', e);
                         return;
                     }
                 } else if (groupName === 'No Sprint') {
@@ -947,12 +966,12 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                 );
                 successCount++;
             } catch (error) {
-                console.error(`Failed to update work item ${item.id}:`, error);
+                log.error(`Failed to update work item ${item.id}:`, error);
             }
         }
 
         if (successCount > 0) {
-            vscode.window.showInformationMessage(`Updated ${successCount} work item(s)`);
+            notifySuccess(`Updated ${successCount} work item(s)`);
             this.cacheManager.invalidatePattern('workitems');
             this.refresh();
         }
@@ -997,16 +1016,16 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                         );
                         successCount++;
                     } catch (e2) {
-                        console.error(`Failed to update priority for work item ${item.id}:`, e2);
+                        log.error(`Failed to update priority for work item ${item.id}:`, e2);
                     }
                 } else {
-                    console.error(`Failed to update priority for work item ${item.id}:`, error);
+                    log.error(`Failed to update priority for work item ${item.id}:`, error);
                 }
             }
         }
 
         if (successCount > 0) {
-            vscode.window.showInformationMessage(`Reordered ${successCount} work item(s)`);
+            notifySuccess(`Reordered ${successCount} work item(s)`);
             this.cacheManager.invalidatePattern('workitems');
             this.refresh();
         }

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { WorkItem } from '../models/workItem';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 
@@ -49,7 +50,7 @@ export class ActiveWorkItemService {
         // Notify listeners
         this.onActiveWorkItemChanged.fire(workItem);
 
-        console.log('[ActiveWorkItemService] Set active work item:', workItem.id);
+        log.debug('[ActiveWorkItemService] Set active work item:', workItem.id);
     }
 
     /**
@@ -64,7 +65,7 @@ export class ActiveWorkItemService {
         // Notify listeners
         this.onActiveWorkItemChanged.fire(null);
 
-        console.log('[ActiveWorkItemService] Cleared active work item');
+        log.debug('[ActiveWorkItemService] Cleared active work item');
     }
 
     /**
@@ -123,7 +124,7 @@ export class ActiveWorkItemService {
             // Verify the work item still exists and fetch full details
             const axiosInstance = this.authManager.getAxiosInstance();
             if (!axiosInstance) {
-                console.log('[ActiveWorkItemService] Cannot restore: not connected');
+                log.debug('[ActiveWorkItemService] Cannot restore: not connected');
                 return;
             }
 
@@ -144,10 +145,10 @@ export class ActiveWorkItemService {
                 // Notify listeners
                 this.onActiveWorkItemChanged.fire(this.activeWorkItem);
 
-                console.log('[ActiveWorkItemService] Restored active work item:', state.id);
+                log.debug('[ActiveWorkItemService] Restored active work item:', state.id);
             }
         } catch (error: any) {
-            console.log('[ActiveWorkItemService] Failed to restore active work item:', error?.message);
+            log.debug('[ActiveWorkItemService] Failed to restore active work item:', error?.message);
             // Clear invalid state
             await this.context.globalState.update(ActiveWorkItemService.ACTIVE_WORK_ITEM_KEY, undefined);
         }
@@ -187,10 +188,10 @@ export class ActiveWorkItemService {
             if (response.data) {
                 this.activeWorkItem = response.data;
                 this.onActiveWorkItemChanged.fire(this.activeWorkItem);
-                console.log('[ActiveWorkItemService] Refreshed active work item');
+                log.debug('[ActiveWorkItemService] Refreshed active work item');
             }
         } catch (error: any) {
-            console.error('[ActiveWorkItemService] Failed to refresh active work item:', error?.message);
+            log.error('[ActiveWorkItemService] Failed to refresh active work item:', error?.message);
         }
     }
 

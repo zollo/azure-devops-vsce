@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
+import { notifyBulkResult, notifySuccess } from '../utils/notify';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItemProvider } from '../views/workItemProvider';
 import { BacklogProvider } from '../views/backlogProvider';
@@ -167,7 +169,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
 
                 if (selectedTeam) {
                     await vscode.workspace.getConfiguration('azureDevOps').update('defaultTeam', selectedTeam.label, true);
-                    vscode.window.showInformationMessage(`Selected team: ${selectedTeam.label}`);
+                    notifySuccess(`Selected team: ${selectedTeam.label}`);
 
                     // Refresh views
                     components.boardProvider.refresh();
@@ -323,7 +325,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                             break;
                         case 'Start Working':
                             components.statusBarManager.updateStatus('working', selected.id.toString());
-                            vscode.window.showInformationMessage(`Started working on #${selected.id}`);
+                            notifySuccess(`Started working on #${selected.id}`);
                             break;
                         case 'Create Branch':
                             vscode.commands.executeCommand('azureDevOps.createBranchFromWorkItem', selected.id);
@@ -388,7 +390,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                     break;
                 case 'stop':
                     await components.activeWorkItemService.clearActive();
-                    vscode.window.showInformationMessage(`Stopped working on #${activeWorkItem.id}`);
+                    notifySuccess(`Stopped working on #${activeWorkItem.id}`);
                     break;
             }
         })
@@ -413,7 +415,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
 
             await components.activeWorkItemService.setActive(workItem);
             const title = workItem.fields['System.Title'];
-            vscode.window.showInformationMessage(`Started working on #${workItem.id}: ${title}`);
+            notifySuccess(`Started working on #${workItem.id}: ${title}`);
         })
     );
 
@@ -428,26 +430,32 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
 
             const timeSpent = components.activeWorkItemService.getTimeSpent();
             await components.activeWorkItemService.clearActive();
-            vscode.window.showInformationMessage(
-                `Stopped working on #${activeWorkItem.id}. Time spent: ${timeSpent}`
-            );
+            notifySuccess(`Stopped working on #${activeWorkItem.id}. Time spent: ${timeSpent}`);
         })
     );
 
     // Refresh commands
     context.subscriptions.push(
         vscode.commands.registerCommand('azureDevOps.refresh', () => {
-            components.workItemProvider.refresh();
+            components.workItemProvider.forceRefresh();
+            components.backlogProvider.refresh();
             components.boardProvider.refresh();
             components.sprintProvider.refresh();
             components.queryProvider.refresh();
-            vscode.window.showInformationMessage('Azure DevOps data refreshed');
+            notifySuccess('Azure DevOps data refreshed');
         })
     );
 
     context.subscriptions.push(
         vscode.commands.registerCommand('azureDevOps.refreshWorkItems', () => {
-            components.workItemProvider.refresh();
+            // A refresh the user asks for skips the 5 minute cache
+            components.workItemProvider.forceRefresh();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('azureDevOps.refreshBacklogs', () => {
+            components.backlogProvider.refresh();
         })
     );
 
@@ -595,7 +603,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
     context.subscriptions.push(
         vscode.commands.registerCommand('azureDevOps.boards.clearAllFilters', () => {
             components.boardProvider.clearAllFilters();
-            vscode.window.showInformationMessage('All board filters cleared');
+            notifySuccess('All board filters cleared');
         })
     );
 
@@ -943,7 +951,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                         { headers: { 'Content-Type': 'application/json-patch+json' } }
                     );
 
-                    vscode.window.showInformationMessage(`Work item #${workItemId} updated`);
+                    notifySuccess(`Work item #${workItemId} updated`);
                     components.workItemProvider.forceRefresh();
                 }
             } catch (error) {
@@ -1015,7 +1023,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                     changes: [{ field: '/fields/System.State', newValue: newState }]
                 });
 
-                vscode.window.showInformationMessage(`Work item #${workItemId} state changed to: ${newState}`);
+                notifySuccess(`Work item #${workItemId} state changed to: ${newState}`);
                 components.workItemProvider.forceRefresh();
             } catch (error) {
                 vscode.window.showErrorMessage(`Failed to change state: ${error}`);
@@ -1088,7 +1096,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                     { headers: { 'Content-Type': 'application/json-patch+json' } }
                 );
 
-                vscode.window.showInformationMessage(
+                notifySuccess(
                     patchValue
                         ? `Work item #${workItemId} assigned to ${selected.label}`
                         : `Work item #${workItemId} unassigned`
@@ -1167,13 +1175,13 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                         successCount++;
                     } catch (error) {
                         errorCount++;
-                        console.error(`Failed to update work item ${uniqueIds[i]}:`, error);
+                        log.error(`Failed to update work item ${uniqueIds[i]}:`, error);
                     }
                 }
             });
 
             if (successCount > 0) {
-                vscode.window.showInformationMessage(`Changed state to "${newState}" for ${successCount} work item(s)${errorCount > 0 ? ` (${errorCount} failed)` : ''}`);
+                notifyBulkResult(`Changed state to "${newState}" for ${successCount} work item(s)`, errorCount);
                 components.workItemProvider.forceRefresh();
             } else {
                 vscode.window.showErrorMessage('Failed to change state for any work items');
@@ -1270,7 +1278,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                         successCount++;
                     } catch (error) {
                         errorCount++;
-                        console.error(`Failed to assign work item ${uniqueIds[i]}:`, error);
+                        log.error(`Failed to assign work item ${uniqueIds[i]}:`, error);
                     }
                 }
             });
@@ -1279,7 +1287,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                 const message = assignTo
                     ? `Assigned ${successCount} work item(s) to ${selected.label}`
                     : `Unassigned ${successCount} work item(s)`;
-                vscode.window.showInformationMessage(`${message}${errorCount > 0 ? ` (${errorCount} failed)` : ''}`);
+                notifyBulkResult(message, errorCount);
                 components.workItemProvider.forceRefresh();
             } else {
                 vscode.window.showErrorMessage('Failed to assign any work items');
@@ -1368,13 +1376,13 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                         successCount++;
                     } catch (error) {
                         errorCount++;
-                        console.error(`Failed to move work item ${uniqueIds[i]}:`, error);
+                        log.error(`Failed to move work item ${uniqueIds[i]}:`, error);
                     }
                 }
             });
 
             if (successCount > 0) {
-                vscode.window.showInformationMessage(`Moved ${successCount} work item(s) to ${selected.label}${errorCount > 0 ? ` (${errorCount} failed)` : ''}`);
+                notifyBulkResult(`Moved ${successCount} work item(s) to ${selected.label}`, errorCount);
                 components.workItemProvider.forceRefresh();
             } else {
                 vscode.window.showErrorMessage('Failed to move any work items');
@@ -1427,7 +1435,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                     { params: { 'api-version': '7.1-preview.3' } }
                 );
 
-                vscode.window.showInformationMessage(`Comment added to work item #${workItemId}`);
+                notifySuccess(`Comment added to work item #${workItemId}`);
             } catch (error) {
                 vscode.window.showErrorMessage(`Failed to add comment: ${error}`);
             }
@@ -1595,7 +1603,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
 
             if (workItemId) {
                 await vscode.env.clipboard.writeText(workItemId.toString());
-                vscode.window.showInformationMessage(`Copied work item ID: ${workItemId}`);
+                notifySuccess(`Copied work item ID: ${workItemId}`);
             }
         })
     );
@@ -1621,7 +1629,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                 if (config) {
                     const url = `${config.organizationUrl}/${config.defaultProject}/_workitems/edit/${workItemId}`;
                     await vscode.env.clipboard.writeText(url);
-                    vscode.window.showInformationMessage('Work item URL copied to clipboard');
+                    notifySuccess('Work item URL copied to clipboard');
                 }
             }
         })
@@ -1661,7 +1669,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                     { headers: { 'Content-Type': 'application/json-patch+json' } }
                 );
 
-                vscode.window.showInformationMessage(`Work item #${workItemId} assigned to you`);
+                notifySuccess(`Work item #${workItemId} assigned to you`);
                 components.workItemProvider.forceRefresh();
             } catch (error) {
                 vscode.window.showErrorMessage(`Failed to assign work item: ${error}`);
@@ -1792,7 +1800,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
             const success = await components.gitIntegration.createBranch(branchName, baseBranch);
             if (success) {
                 // Also update the work item to link the branch (optional)
-                vscode.window.showInformationMessage(`Created and switched to branch: ${branchName}`);
+                notifySuccess(`Created and switched to branch: ${branchName}`);
             }
         })
     );
@@ -1957,7 +1965,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                                 return;
                             }
                         } catch (error) {
-                            console.error('Failed to create PR via API:', error);
+                            log.error('Failed to create PR via API:', error);
                         }
                     }
                 }
@@ -2080,7 +2088,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
 
             const success = await components.workItemLinksManager.addLink(workItemId, (selected as any).id, linkType.label);
             if (success) {
-                vscode.window.showInformationMessage(`Linked as ${linkType.label}`);
+                notifySuccess(`Linked as ${linkType.label}`);
                 components.workItemProvider.forceRefresh();
             } else {
                 vscode.window.showErrorMessage('Failed to create link');

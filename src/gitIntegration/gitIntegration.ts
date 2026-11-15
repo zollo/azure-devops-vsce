@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
+import { notifySuccess } from '../utils/notify';
 import * as child_process from 'child_process';
 import { promisify } from 'util';
 
@@ -16,7 +18,7 @@ export class GitIntegration {
             const { stdout } = await exec('git branch --show-current', { cwd: this.workspaceRoot });
             return stdout.trim();
         } catch (error) {
-            console.error('Failed to get current branch:', error);
+            log.error('Failed to get current branch:', error);
             return null;
         }
     }
@@ -24,10 +26,10 @@ export class GitIntegration {
     async createBranch(branchName: string, fromBranch: string = 'main'): Promise<boolean> {
         try {
             await exec(`git checkout -b ${branchName} ${fromBranch}`, { cwd: this.workspaceRoot });
-            vscode.window.showInformationMessage(`Created and switched to branch: ${branchName}`);
+            notifySuccess(`Created and switched to branch: ${branchName}`);
             return true;
         } catch (error) {
-            console.error('Failed to create branch:', error);
+            log.error('Failed to create branch:', error);
             vscode.window.showErrorMessage(`Failed to create branch: ${error}`);
             return false;
         }
@@ -37,10 +39,10 @@ export class GitIntegration {
         try {
             const commitMessage = `#${workItemId} ${message}`;
             await exec(`git commit -m "${commitMessage}"`, { cwd: this.workspaceRoot });
-            vscode.window.showInformationMessage(`Committed with work item link: #${workItemId}`);
+            notifySuccess(`Committed with work item link: #${workItemId}`);
             return true;
         } catch (error) {
-            console.error('Failed to commit:', error);
+            log.error('Failed to commit:', error);
             vscode.window.showErrorMessage(`Failed to commit: ${error}`);
             return false;
         }
@@ -51,7 +53,7 @@ export class GitIntegration {
             const { stdout } = await exec('git status --porcelain', { cwd: this.workspaceRoot });
             return stdout.split('\n').filter(line => line.trim());
         } catch (error) {
-            console.error('Failed to get uncommitted changes:', error);
+            log.error('Failed to get uncommitted changes:', error);
             return [];
         }
     }
@@ -65,7 +67,7 @@ export class GitIntegration {
             }
             return true;
         } catch (error) {
-            console.error('Failed to stage files:', error);
+            log.error('Failed to stage files:', error);
             return false;
         }
     }
@@ -99,7 +101,7 @@ export class GitIntegration {
                     return { hash, message, date };
                 });
         } catch (error) {
-            console.error('Failed to get recent commits:', error);
+            log.error('Failed to get recent commits:', error);
             return [];
         }
     }
@@ -118,7 +120,7 @@ export class GitIntegration {
             const { stdout } = await exec('git config --get remote.origin.url', { cwd: this.workspaceRoot });
             return stdout.trim();
         } catch (error) {
-            console.error('Failed to get repository URL:', error);
+            log.error('Failed to get repository URL:', error);
             return null;
         }
     }
@@ -132,10 +134,10 @@ export class GitIntegration {
             }
 
             await exec(`git push origin ${branch}`, { cwd: this.workspaceRoot });
-            vscode.window.showInformationMessage(`Pushed ${branch} to remote`);
+            notifySuccess(`Pushed ${branch} to remote`);
             return true;
         } catch (error) {
-            console.error('Failed to push:', error);
+            log.error('Failed to push:', error);
             vscode.window.showErrorMessage(`Failed to push: ${error}`);
             return false;
         }
@@ -163,7 +165,7 @@ export class GitIntegration {
 
             return true;
         } catch (error) {
-            console.error('Failed to create pull request:', error);
+            log.error('Failed to create pull request:', error);
             vscode.window.showErrorMessage(`Failed to create pull request: ${error}`);
             return false;
         }

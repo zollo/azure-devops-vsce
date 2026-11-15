@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem } from '../models/workItem';
 import { CacheManager } from '../utils/cacheManager';
@@ -64,7 +65,8 @@ export class SearchService {
             const wiqlResponse = await axiosInstance.post(
                 `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql`,
                 { query: wiql },
-                { params: { 'api-version': '7.1' } }
+                // Without $top a common word returns every matching id in the project
+                { params: { 'api-version': '7.1', '$top': maxResults } }
             );
 
             const workItemRefs = wiqlResponse.data.workItems || [];
@@ -92,7 +94,7 @@ export class SearchService {
 
             return workItems;
         } catch (error: any) {
-            console.error('[SearchService] Search failed:', error?.message || error);
+            log.error('[SearchService] Search failed:', error?.message || error);
             return [];
         }
     }
@@ -119,7 +121,7 @@ export class SearchService {
 
             return response.data;
         } catch (error: any) {
-            console.error(`[SearchService] Failed to get work item ${id}:`, error?.message || error);
+            log.error(`[SearchService] Failed to get work item ${id}:`, error?.message || error);
             return null;
         }
     }
@@ -158,7 +160,7 @@ export class SearchService {
                 return recentIds.indexOf(a.id) - recentIds.indexOf(b.id);
             });
         } catch (error: any) {
-            console.error('[SearchService] Failed to get recent work items:', error?.message || error);
+            log.error('[SearchService] Failed to get recent work items:', error?.message || error);
             return [];
         }
     }

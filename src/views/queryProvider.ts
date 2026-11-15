@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { AuthenticationManager } from '../authentication/authenticationManager';
+import { LIST_FIELDS, MAX_IDS_PER_REQUEST } from '../utils/workItemBatches';
+import { applyLoadError, describeLoadError } from './loadErrors';
 import { WorkItem } from '../models/workItem';
 
 export interface Query {
@@ -27,12 +30,15 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
         this.authenticationManager = authenticationManager;
     }
 
+    private queriesError: unknown;
+
     refresh(): void {
+        // getChildren reloads the queries; loading here as well made every refresh fetch them twice
         this._onDidChangeTreeData.fire();
-        this.loadQueries();
     }
 
     private async loadQueries(): Promise<void> {
+        this.queriesError = undefined;
         if (!this.authenticationManager.isConnected()) {
             this.queries = [];
             return;
@@ -60,8 +66,9 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
 
             this.queries = this.parseQueryHierarchy(response.data.value || []);
         } catch (error: any) {
-            console.error('Failed to load queries:', error?.message || error);
+            log.error('Failed to load queries:', error?.message || error);
             this.queries = [];
+            this.queriesError = error;
         }
     }
 
@@ -90,6 +97,14 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
         if (!element) {
             // Root level - show query folders
             await this.loadQueries();
+
+            if (this.queriesError) {
+                return [applyLoadError(
+                    new QueryTreeItem('', vscode.TreeItemCollapsibleState.None),
+                    describeLoadError(this.queriesError, 'queries'),
+                    'azureDevOps.refreshQueries'
+                )];
+            }
 
             if (this.queries.length === 0) {
                 return [new QueryTreeItem('No queries found', vscode.TreeItemCollapsibleState.None)];
@@ -175,7 +190,8 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
 
             // Run the query
             const response = await axiosInstance.get(
-                `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql/${query.id}`
+                `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql/${query.id}`,
+                { params: { '$top': MAX_IDS_PER_REQUEST } }
             );
 
             const workItemRefs = response.data.workItems || [];
@@ -189,16 +205,17 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
             const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
                 params: {
                     'ids': workItemIds,
-                    '$expand': 'all'
+                    'fields': LIST_FIELDS.join(','),
+                    'errorPolicy': 'omit'
                 }
             });
 
-            const results = detailsResponse.data.value || [];
+            const results = (detailsResponse.data.value || []).filter((item: any) => item);
             this.queryResults.set(query.id, results);
 
             return results;
         } catch (error) {
-            console.error('Failed to run query:', error);
+            log.error('Failed to run query:', error);
             vscode.window.showErrorMessage(`Failed to run query: ${error}`);
             return [];
         }
@@ -219,7 +236,8 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
 
             const response = await axiosInstance.post(
                 `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql`,
-                { query: wiql }
+                { query: wiql },
+                { params: { '$top': MAX_IDS_PER_REQUEST } }
             );
 
             const workItemRefs = response.data.workItems || [];
@@ -232,13 +250,14 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
             const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
                 params: {
                     'ids': workItemIds,
-                    '$expand': 'all'
+                    'fields': LIST_FIELDS.join(','),
+                    'errorPolicy': 'omit'
                 }
             });
 
-            return detailsResponse.data.value || [];
+            return (detailsResponse.data.value || []).filter((item: any) => item);
         } catch (error) {
-            console.error('Failed to run custom query:', error);
+            log.error('Failed to run custom query:', error);
             return [];
         }
     }

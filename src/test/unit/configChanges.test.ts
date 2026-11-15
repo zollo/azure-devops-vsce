@@ -24,3 +24,10 @@ test('connection settings still count, alone or alongside a view setting', () =>
 test('unrelated settings do not count', () => {
     assert.equal(affectsConnectionSettings(changeOf('editor.fontSize'), keys), false);
 });
+
+test('refresh interval and notification settings do not count as connection changes', () => {
+    const all = [...keys, 'azureDevOps.autoRefreshInterval', 'azureDevOps.showNotifications'];
+    assert.equal(affectsConnectionSettings(changeOf('azureDevOps.autoRefreshInterval'), all), false);
+    assert.equal(affectsConnectionSettings(changeOf('azureDevOps.showNotifications'), all), false);
+    assert.equal(affectsConnectionSettings(changeOf('azureDevOps.autoRefreshInterval', 'azureDevOps.defaultProject'), all), true);
+});

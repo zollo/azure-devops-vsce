@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import axios from 'axios';
 
 export interface Organization {
@@ -76,7 +77,7 @@ export class OrganizationManager {
 
             return [organization];
         } catch (error: any) {
-            console.error('Failed to fetch organizations:', error.message);
+            log.error('Failed to fetch organizations:', error.message);
             if (error.response?.status === 404) {
                 vscode.window.showErrorMessage(`Organization not found or not accessible: "${error.config?.url}"`);
             } else if (error.response?.status === 401) {
@@ -155,7 +156,7 @@ export class OrganizationManager {
 
             return projects;
         } catch (error: any) {
-            console.error('Failed to fetch projects:', error.message);
+            log.error('Failed to fetch projects:', error.message);
             throw new Error('Failed to fetch projects from organization.');
         }
     }
@@ -212,7 +213,7 @@ export class OrganizationManager {
 
             return teams;
         } catch (error: any) {
-            console.error('Failed to fetch teams:', error.message);
+            log.error('Failed to fetch teams:', error.message);
             // Teams are optional, so return empty array
             return [];
         }
