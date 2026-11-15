@@ -65,7 +65,8 @@ export class SearchService {
             const wiqlResponse = await axiosInstance.post(
                 `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql`,
                 { query: wiql },
-                { params: { 'api-version': '7.1' } }
+                // Without $top a common word returns every matching id in the project
+                { params: { 'api-version': '7.1', '$top': maxResults } }
             );
 
             const workItemRefs = wiqlResponse.data.workItems || [];
