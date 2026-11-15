@@ -9,7 +9,9 @@ import {
     WORK_ITEM_COLUMNS,
     WORK_ITEM_COLUMN_IDS,
     columnVisibilityCss,
+    compareSortKeys,
     formatDateCompact,
+    layoutForWidth,
     gridTemplateFor,
     minTableWidthFor,
     renderHeaderRow,
@@ -134,4 +136,51 @@ test('columnVisibilityCss has a hide rule for every column', () => {
     for (const id of WORK_ITEM_COLUMN_IDS) {
         assert.ok(css.includes(`.t.hide-col-${id} [data-col="${id}"] { display: none; }`), id);
     }
+});
+
+test('narrow tables shrink the assignee, then set columns aside, but always keep the title', () => {
+    const chosen = [...DEFAULT_WORK_ITEM_COLUMNS];
+    const wide = layoutForWidth(WORK_ITEM_COLUMNS, chosen, 1400, CHECKBOX_COLUMN_WIDTH);
+    assert.deepEqual(wide.shown, chosen);
+    assert.deepEqual([...wide.setAside, ...wide.compact], []);
+    const medium = layoutForWidth(WORK_ITEM_COLUMNS, chosen, 900, CHECKBOX_COLUMN_WIDTH);
+    assert.deepEqual(medium.compact, ['assignedTo']);
+    assert.deepEqual(medium.setAside, ['areaPath']);
+    assert.match(medium.tracks, / 56px /);
+    for (const width of [1000, 800, 640, 500, 420]) {
+        const layout = layoutForWidth(WORK_ITEM_COLUMNS, WORK_ITEM_COLUMN_IDS, width, CHECKBOX_COLUMN_WIDTH);
+        assert.ok(layout.minWidth <= width, `everything chosen still fits at ${width}px (${layout.minWidth}px)`);
+        assert.ok(layout.shown.includes('title'));
+    }
+    const narrow = layoutForWidth(WORK_ITEM_COLUMNS, chosen, 420, CHECKBOX_COLUMN_WIDTH);
+    assert.deepEqual(narrow.shown, ['id', 'title', 'state', 'assignedTo']);
+});
+
+test('the layout and sort functions run on their own, as the webview loads them', () => {
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const layout = new Function(`return (${layoutForWidth.toString()})`)();
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const compare = new Function(`return (${compareSortKeys.toString()})`)();
+    assert.deepEqual(layout(WORK_ITEM_COLUMNS, ['id', 'title'], 300, 32).shown, ['id', 'title']);
+    assert.equal(compare('2', '10', 'number', false) < 0, true);
+});
+
+test('sort keys compare numbers, text naturally, and keep empty values last', () => {
+    const sorted = (keys: string[], kind: 'number' | 'text', desc = false) =>
+        [...keys].sort((a, b) => compareSortKeys(a, b, kind, desc));
+    assert.deepEqual(sorted(['10', '', '2', '1'], 'number'), ['1', '2', '10', '']);
+    assert.deepEqual(sorted(['10', '', '2', '1'], 'number', true), ['10', '2', '1', '']);
+    assert.deepEqual(sorted(['Sprint 10', 'sprint 2', 'Alpha'], 'text'), ['Alpha', 'sprint 2', 'Sprint 10']);
+});
+
+test('cells carry the value the table sorts by', () => {
+    const html = renderWorkItemRow({
+        id: 7,
+        fields: { 'System.Title': 'T', 'System.ChangedDate': '2026-11-01T10:00:00Z', 'Microsoft.VSTS.Common.Priority': 2 }
+    }, ctx);
+    assert.match(html, /data-sort="7"[^>]*data-col="id"/);
+    assert.match(html, new RegExp(`data-sort="${Date.parse('2026-11-01T10:00:00Z')}"[^>]*data-col="changedDate"`));
+    assert.match(html, /data-sort=""[^>]*data-col="assignedTo"/);
+    assert.match(html, /data-sort="2"[^>]*data-col="priority"/);
+    assert.match(renderHeaderRow(), /<th role="columnheader" data-col="title" aria-sort="none"><button type="button" class="sort-btn" data-sort-col="title"/);
 });

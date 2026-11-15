@@ -15,7 +15,9 @@ import {
     WORK_ITEM_COLUMNS,
     WorkItemColumnId,
     columnVisibilityCss,
+    compareSortKeys,
     gridTemplateFor,
+    layoutForWidth,
     minTableWidthFor,
     renderHeaderRow,
     renderWorkItemRow,
@@ -960,6 +962,45 @@ export class WorkItemsListPanel {
             font-size: 11px;
             color: var(--vscode-foreground);
         }
+        .wi-table th[data-col]:not([data-col="select"]) {
+            padding: 0;
+        }
+        .sort-btn {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            width: 100%;
+            height: 28px;
+            padding: 0 8px;
+            font: inherit;
+            color: inherit;
+            text-align: left;
+            background: none;
+            border: none;
+            cursor: pointer;
+        }
+        .sort-btn:hover {
+            background: var(--vscode-list-hoverBackground);
+        }
+        .sort-btn:focus-visible {
+            outline: 1px solid var(--vscode-focusBorder);
+            outline-offset: -1px;
+        }
+        .col-label {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .sort-icon {
+            flex: none;
+            font-size: 12px;
+        }
+        th[aria-sort="none"] .sort-icon { visibility: hidden; }
+        .compact-label { display: none; }
+        /* Narrow panels: the assignee column shows only the avatar */
+        .wi-table.compact-assignedTo th[data-col="assignedTo"] .col-label,
+        .wi-table.compact-assignedTo td[data-col="assignedTo"] .truncate { display: none; }
+        .wi-table.compact-assignedTo th[data-col="assignedTo"] .compact-label { display: inline; }
         ${columnVisibilityCss('.wi-table')}
         /* Keep the selection column in view when the table scrolls sideways */
         .wi-table [data-col="select"] {
@@ -1149,6 +1190,23 @@ export class WorkItemsListPanel {
             margin-bottom: 12px;
             opacity: 0.5;
         }
+        .empty-state[hidden] { display: none; }
+        .empty-filters {
+            margin: 6px auto 12px;
+            max-width: 520px;
+            overflow-wrap: anywhere;
+        }
+        .list-footer {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px 12px;
+            padding: 4px 12px;
+            font-size: 12px;
+            text-align: left;
+            color: var(--vscode-descriptionForeground);
+            border-top: 1px solid var(--vscode-panel-border);
+        }
+        .list-footer .set-aside { margin-left: auto; }
         .cell-actions {
             opacity: 0;
             transition: opacity 0.2s;
@@ -1308,6 +1366,12 @@ export class WorkItemsListPanel {
                 ${this.workItems.map(wi => renderWorkItemRow(wi, rowContext)).join('')}
             </tbody>
         </table>
+        <div class="empty-state" id="filteredEmpty" hidden>
+            <div class="empty-icon codicon codicon-filter"></div>
+            <div>No work items match the filters</div>
+            <div class="empty-filters" id="filteredEmptyDetail"></div>
+            <button type="button" class="toolbar-btn toolbar-btn-secondary" id="clearAllFiltersBtn">Clear filters</button>
+        </div>
         ` : `
         <div class="empty-state">
             <div class="empty-icon codicon codicon-checklist"></div>
@@ -1315,6 +1379,7 @@ export class WorkItemsListPanel {
         </div>
         `}
     </div>
+    ${this.workItems.length > 0 ? `<div class="list-footer" id="listFooter"><span id="listCount" role="status" aria-live="polite"></span><span id="listSetAside" class="set-aside"></span></div>` : ''}
 
     <script nonce="${nonce}">
         (function() {
@@ -1324,6 +1389,12 @@ export class WorkItemsListPanel {
             const DEFAULT_COLUMNS = ${serializeForScript(DEFAULT_WORK_ITEM_COLUMNS)};
             const CHECKBOX_COLUMN_WIDTH = ${CHECKBOX_COLUMN_WIDTH};
             let visibleColumns = ${serializeForScript(visibleColumns)};
+            const layoutForWidth = (${layoutForWidth.toString()});
+            const compareSortKeys = (${compareSortKeys.toString()});
+            const COLUMN_LABELS = {};
+            ALL_COLUMNS.forEach(col => { COLUMN_LABELS[col.id] = col.label; });
+            let sortState = null;
+            let lastLayoutKey = '';
 
             // Show the chosen columns and size the grid tracks to match
             function applyColumns() {
@@ -1333,19 +1404,118 @@ export class WorkItemsListPanel {
                     cb.checked = shown.has(cb.value);
                 });
                 if (!table) return;
-                const tracks = [CHECKBOX_COLUMN_WIDTH + 'px'];
-                let minWidth = CHECKBOX_COLUMN_WIDTH;
+                // Narrow panels set some columns aside so the title keeps its room
+                const wrapper = document.querySelector('.table-wrapper');
+                const width = wrapper && wrapper.clientWidth ? wrapper.clientWidth : window.innerWidth;
+                const layout = layoutForWidth(ALL_COLUMNS, visibleColumns, width, CHECKBOX_COLUMN_WIDTH);
+                const key = layout.tracks + '|' + layout.shown.join(',');
+                if (key === lastLayoutKey) {
+                    scheduleFitTags();
+                    return;
+                }
+                lastLayoutKey = key;
+                const onScreen = new Set(layout.shown);
+                const compact = new Set(layout.compact);
                 ALL_COLUMNS.forEach(col => {
-                    const on = shown.has(col.id);
-                    table.classList.toggle('hide-col-' + col.id, !on);
-                    if (on) {
-                        tracks.push(col.track);
-                        minWidth += col.minWidth;
+                    table.classList.toggle('hide-col-' + col.id, !onScreen.has(col.id));
+                    table.classList.toggle('compact-' + col.id, compact.has(col.id));
+                });
+                table.style.setProperty('--wi-columns', layout.tracks);
+                table.style.setProperty('--wi-min-width', layout.minWidth + 'px');
+                const setAside = document.getElementById('listSetAside');
+                if (setAside) {
+                    const names = layout.setAside.map(id => COLUMN_LABELS[id]);
+                    setAside.textContent = names.length ? names.join(', ') + (names.length === 1 ? ' is' : ' are') + ' hidden at this width' : '';
+                }
+                scheduleFitTags();
+            }
+
+            // Sorting: click a header to sort ascending, again for descending, a third time to
+            // go back to the order the query returned
+            function applySort() {
+                const tbody = document.querySelector('#workItemsTable tbody');
+                if (!tbody) return;
+                const rows = Array.from(tbody.children);
+                rows.forEach((row, index) => {
+                    if (row.dataset.order === undefined) row.dataset.order = String(index);
+                });
+                const col = sortState && ALL_COLUMNS.find(c => c.id === sortState.col);
+                const keyOf = row => {
+                    const cell = row.querySelector('td[data-col="' + col.id + '"]');
+                    return cell ? cell.getAttribute('data-sort') || '' : '';
+                };
+                rows.sort((a, b) => {
+                    const byKey = col ? compareSortKeys(keyOf(a), keyOf(b), col.sort, sortState.dir === 'desc') : 0;
+                    return byKey || Number(a.dataset.order) - Number(b.dataset.order);
+                });
+                rows.forEach(row => tbody.appendChild(row));
+                document.querySelectorAll('#workItemsTable thead th[data-col]').forEach(th => {
+                    if (th.dataset.col === 'select') return;
+                    const on = col && th.dataset.col === col.id;
+                    th.setAttribute('aria-sort', on ? (sortState.dir === 'desc' ? 'descending' : 'ascending') : 'none');
+                    const icon = th.querySelector('.sort-icon');
+                    if (icon) {
+                        icon.classList.toggle('codicon-arrow-up', !!on && sortState.dir === 'asc');
+                        icon.classList.toggle('codicon-arrow-down', !!on && sortState.dir === 'desc');
                     }
                 });
-                table.style.setProperty('--wi-columns', tracks.join(' '));
-                table.style.setProperty('--wi-min-width', minWidth + 'px');
-                scheduleFitTags();
+            }
+
+            function toggleSort(colId) {
+                if (!sortState || sortState.col !== colId) {
+                    sortState = { col: colId, dir: 'asc' };
+                } else if (sortState.dir === 'asc') {
+                    sortState = { col: colId, dir: 'desc' };
+                } else {
+                    sortState = null;
+                }
+                applySort();
+                saveFilterState();
+            }
+
+            // "Showing X of Y" under the table, and an empty state that names the active filters
+            function updateCounts() {
+                const rows = Array.from(document.querySelectorAll('#workItemsTable tbody tr'));
+                const shown = rows.filter(r => r.style.display !== 'none').length;
+                const count = document.getElementById('listCount');
+                if (count) {
+                    const noun = rows.length === 1 ? 'work item' : 'work items';
+                    let text = shown === rows.length ? rows.length + ' ' + noun : 'Showing ' + shown + ' of ' + rows.length + ' ' + noun;
+                    if (selectedIds.size > 0) text += ' \u00b7 ' + selectedIds.size + ' selected';
+                    count.textContent = text;
+                }
+                const empty = document.getElementById('filteredEmpty');
+                const table = document.getElementById('workItemsTable');
+                if (!empty || !table) return;
+                const nothing = rows.length > 0 && shown === 0;
+                empty.hidden = !nothing;
+                table.style.display = nothing ? 'none' : '';
+                if (nothing) {
+                    document.getElementById('filteredEmptyDetail').textContent = describeFilters();
+                }
+            }
+
+            function describeFilters() {
+                const parts = [];
+                const keywordEl = document.getElementById('keywordFilter');
+                if (keywordEl && keywordEl.value.trim()) parts.push('Keyword "' + keywordEl.value.trim() + '"');
+                const labels = { type: 'Type', state: 'State', assignee: 'Assignee', area: 'Area', tags: 'Tags' };
+                Object.keys(labels).forEach(name => {
+                    const values = getSelectedFilters(name);
+                    if (values.length) parts.push(labels[name] + ': ' + values.join(', '));
+                });
+                return parts.join(' \u00b7 ');
+            }
+
+            function clearAllFilters() {
+                const keywordEl = document.getElementById('keywordFilter');
+                if (keywordEl) keywordEl.value = '';
+                ['type', 'state', 'assignee', 'area', 'tags'].forEach(name => {
+                    const container = document.getElementById(name + 'DropdownContent');
+                    if (container) container.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+                    updateDropdownButton(name);
+                });
+                applyFilters();
             }
 
             function setColumns(columns, persist) {
@@ -1456,6 +1626,7 @@ export class WorkItemsListPanel {
                 });
                 applyAvatarColors();
                 syncFilterOptions();
+                if (sortState) applySort();
                 applyFilters();
             }
 
@@ -1525,7 +1696,8 @@ export class WorkItemsListPanel {
                 const previous = vscode.getState() || {};
                 vscode.setState(Object.assign({}, previous, {
                     keyword: keywordEl ? keywordEl.value : '',
-                    filters: filters
+                    filters: filters,
+                    sort: sortState
                 }));
             }
 
@@ -1535,6 +1707,10 @@ export class WorkItemsListPanel {
                 const keywordEl = document.getElementById('keywordFilter');
                 if (keywordEl && typeof saved.keyword === 'string') {
                     keywordEl.value = saved.keyword;
+                }
+                if (saved.sort && ALL_COLUMNS.some(c => c.id === saved.sort.col) && (saved.sort.dir === 'asc' || saved.sort.dir === 'desc')) {
+                    sortState = { col: saved.sort.col, dir: saved.sort.dir };
+                    applySort();
                 }
                 const filters = saved.filters || {};
                 ['type', 'state', 'assignee', 'area', 'tags'].forEach(name => {
@@ -1603,6 +1779,7 @@ export class WorkItemsListPanel {
                 if (bulkActions) {
                     bulkActions.style.display = selectedIds.size > 0 ? 'flex' : 'none';
                 }
+                updateCounts();
             }
 
             function updateSelectAllCheckbox() {
@@ -1727,6 +1904,7 @@ export class WorkItemsListPanel {
                 });
 
                 updateSelectAllCheckbox();
+                updateCounts();
                 scheduleFitTags();
                 saveFilterState();
             }
@@ -1955,9 +2133,18 @@ export class WorkItemsListPanel {
                 // Re-fit tags whenever the available width changes
                 const tableWrapper = document.querySelector('.table-wrapper');
                 if (tableWrapper && typeof ResizeObserver !== 'undefined') {
-                    new ResizeObserver(scheduleFitTags).observe(tableWrapper);
+                    new ResizeObserver(applyColumns).observe(tableWrapper);
                 }
                 applyColumns();
+
+                // Sortable headers and the empty state's clear button
+                document.querySelectorAll('#workItemsTable .sort-btn').forEach(btn => {
+                    btn.addEventListener('click', () => toggleSort(btn.dataset.sortCol));
+                });
+                const clearAllFiltersBtn = document.getElementById('clearAllFiltersBtn');
+                if (clearAllFiltersBtn) {
+                    clearAllFiltersBtn.addEventListener('click', clearAllFilters);
+                }
 
                 // Filter checkboxes
                 document.querySelectorAll('.filter-dropdown-content input[type="checkbox"]:not([name="column"])').forEach(cb => {
