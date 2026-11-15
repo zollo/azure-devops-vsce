@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import sanitizeHtml from 'sanitize-html';
 
@@ -18,8 +19,9 @@ export function escapeHtml(value: unknown): string {
 }
 
 /**
- * Encode a value as a JavaScript string literal for use inside an inline event handler
- * attribute, e.g. onclick="doThing(${jsArg(name)})". The quotes are included.
+ * Encode a value as a JavaScript (and JSON) string literal for use inside an attribute, such as
+ * an inline event handler, onclick="doThing(${jsArg(name)})", or an argument list,
+ * data-click-args='[${jsArg(name)}]'. The quotes are included.
  * HTML-escaping alone is not enough there: the browser decodes entities in the attribute
  * before running it as JavaScript, so a ' in the data would end the string.
  */
@@ -89,18 +91,25 @@ export function sanitizeRichText(html: string | undefined | null): string {
     });
 }
 
+/** A random value for a Content-Security-Policy script nonce. Use a new one for every page. */
+export function getNonce(): string {
+    return crypto.randomBytes(18).toString('base64').replace(/[^A-Za-z0-9]/g, '');
+}
+
 /**
  * Content-Security-Policy for the extension's webviews. Blocks all remote scripts, frames and
  * network requests; images may load over https (avatars, attachments) and from the extension.
- * Inline scripts are allowed because the webviews use inline event handlers; the escaping
- * helpers above are what keep work item data from becoming script.
+ *
+ * With a nonce, only scripts carrying that nonce run: no inline event handlers and no injected
+ * script tags, so work item content that slips past escaping still can't run. Pages that still
+ * use inline event handlers call it without one, which allows inline script.
  */
-export function webviewCsp(webview: vscode.Webview): string {
+export function webviewCsp(webview: vscode.Webview, nonce?: string): string {
     return [
         "default-src 'none'",
         `img-src ${webview.cspSource} https: data:`,
         `style-src ${webview.cspSource} 'unsafe-inline'`,
         `font-src ${webview.cspSource}`,
-        `script-src ${webview.cspSource} 'unsafe-inline'`
+        nonce ? `script-src 'nonce-${nonce}'` : `script-src ${webview.cspSource} 'unsafe-inline'`
     ].join('; ') + ';';
 }

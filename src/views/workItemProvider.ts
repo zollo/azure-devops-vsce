@@ -5,8 +5,7 @@ import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem, WorkItemTypeEnum, WorkItemStateEnum } from '../models/workItem';
 import { CacheManager } from '../utils/cacheManager';
 import { WorkItemEventManager } from '../events/workItemEventManager';
-import { METADATA_TTL_MS, metadataKey, sharedMetadataCache } from '../utils/metadataCache';
-import { fetchWorkItemsInBatches } from '../utils/workItemBatches';
+import { azureDevOps } from '../services/azureDevOpsService';
 import { applyLoadError, describeLoadError } from './loadErrors';
 
 export type GroupByOption = 'type' | 'state' | 'assignedTo' | 'sprint' | 'none';
@@ -228,30 +227,9 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             // Get detailed work item information (limit to maxItems)
             const workItemIdsToLoad = workItemRefs.slice(0, maxItems).map((item: any) => item.id);
 
-            let batchError: unknown;
-            // Load in batches of 200 (Azure DevOps API limit), 3 at a time. Relations are
-            // needed to show which items have children; links and other expansions are not.
-            this.workItems = await fetchWorkItemsInBatches<any>(
-                workItemIdsToLoad,
-                async batch => {
-                    const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
-                        params: {
-                            'ids': batch.join(','),
-                            '$expand': 'relations',
-                            'errorPolicy': 'omit'
-                        }
-                    });
-                    return (detailsResponse.data.value || []).filter((item: any) => item);
-                },
-                (error: any) => {
-                    log.error('Failed to load work items batch:', error?.message || error);
-                    batchError = batchError ?? error;
-                }
-            );
-            // Every batch failed: report it rather than showing an empty list
-            if (this.workItems.length === 0 && batchError) {
-                throw batchError;
-            }
+            // Relations are needed to show which items have children; other expansions are not.
+            // Throws only when every batch failed, so a failure shows as an error, not an empty list.
+            this.workItems = await azureDevOps().getWorkItems(workItemIdsToLoad, { expand: 'relations' });
 
             // Prefetch state categories for all unique work item types
             await this.prefetchStateCategoriesForWorkItems();
@@ -469,12 +447,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
 
             if (childIds.length === 0) return [];
 
-            const children = await fetchWorkItemsInBatches<any>(childIds, async batch => {
-                const childResponse = await axiosInstance.get('/_apis/wit/workitems', {
-                    params: { 'ids': batch.join(','), '$expand': 'relations', 'errorPolicy': 'omit', 'api-version': '7.0' }
-                });
-                return (childResponse.data.value || []).filter((item: any) => item);
-            });
+            const children = await azureDevOps().getWorkItems(childIds, { expand: 'relations' });
             return children.map((child: any) => {
                 const title = child.fields['System.Title'];
                 const state = child.fields['System.State'];
@@ -567,56 +540,14 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
         });
 
         // Fetch state categories for each unique type; types already known come from the shared cache
-        const config = this.authenticationManager.getConfig();
         await Promise.all(Array.from(uniqueTypes).map(async type => {
             try {
-                const categories = await sharedMetadataCache.getOrLoad(
-                    metadataKey('state-categories', config?.organizationUrl, config?.defaultProject, type),
-                    METADATA_TTL_MS,
-                    () => this.fetchStateCategoriesForType(type)
-                );
+                const categories = await azureDevOps().getStateCategories(type);
                 categories.forEach((category, stateName) => this.stateCategoryCache.set(`${type}:${stateName}`, category));
             } catch {
                 // Fall back to matching state names
             }
         }));
-    }
-
-    /**
-     * Fetch state categories for a specific work item type from Azure DevOps API
-     * Returns a map of state name (lowercase) -> category
-     */
-    private async fetchStateCategoriesForType(workItemType: string): Promise<Map<string, string>> {
-        const stateCategories = new Map<string, string>();
-
-        // Errors propagate so a failed lookup isn't cached; icons fall back to state names meanwhile
-        const axiosInstance = this.authenticationManager.getAxiosInstance();
-        const config = this.authenticationManager.getConfig();
-
-        if (!axiosInstance || !config?.defaultProject) {
-            return stateCategories;
-        }
-
-        const response = await axiosInstance.get(
-            `/${encodeURIComponent(config.defaultProject)}/_apis/wit/workitemtypes/${encodeURIComponent(workItemType)}/states`,
-            {
-                params: {
-                    'api-version': '7.1'
-                }
-            }
-        );
-
-        if (response.data && response.data.value) {
-            response.data.value.forEach((stateInfo: any) => {
-                if (stateInfo.name && stateInfo.category) {
-                    const stateName = stateInfo.name.toLowerCase();
-                    const category = stateInfo.category;
-                    stateCategories.set(stateName, category);
-                }
-            });
-        }
-
-        return stateCategories;
     }
 
     /**

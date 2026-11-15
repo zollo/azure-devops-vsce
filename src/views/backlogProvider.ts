@@ -3,6 +3,8 @@ import { log } from '../utils/logger';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItemTypeEnum } from '../models/workItem';
 import { applyLoadError, describeLoadError } from './loadErrors';
+import { azureDevOps } from '../services/azureDevOpsService';
+import { LIST_FIELDS } from '../utils/workItemBatches';
 
 export class BacklogProvider implements vscode.TreeDataProvider<BacklogTreeItem> {
     private _onDidChangeTreeData = new vscode.EventEmitter<BacklogTreeItem | undefined | void>();
@@ -65,12 +67,8 @@ export class BacklogProvider implements vscode.TreeDataProvider<BacklogTreeItem>
                     return [new BacklogTreeItem('No work items', vscode.TreeItemCollapsibleState.None)];
                 }
 
-                const workItemIds = workItemRefs.slice(0, 100).map((wi: any) => wi.target.id).join(',');
-                const detailsResponse = await axiosInstance.get(`/_apis/wit/workitems`, {
-                    params: { ids: workItemIds, 'api-version': '7.0' }
-                });
-
-                const workItems = detailsResponse.data.value || [];
+                const workItemIds: number[] = workItemRefs.slice(0, 100).map((wi: any) => wi.target?.id).filter((id: unknown) => typeof id === 'number');
+                const workItems = await azureDevOps().getWorkItems(workItemIds, { fields: LIST_FIELDS });
                 return workItems.map((item: any) => {
                     const title = item.fields['System.Title'];
                     const state = item.fields['System.State'];

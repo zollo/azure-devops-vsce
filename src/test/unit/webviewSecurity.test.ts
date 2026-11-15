@@ -1,7 +1,7 @@
 import './vscodeMock';
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { escapeHtml, jsArg, safeCssColor, sanitizeRichText, serializeForScript } from '../../utils/webviewSecurity';
+import { escapeHtml, getNonce, jsArg, safeCssColor, sanitizeRichText, serializeForScript, webviewCsp } from '../../utils/webviewSecurity';
 
 /** Decode the HTML entities escapeHtml produces, the way a browser decodes an attribute value. */
 function decodeAttribute(value: string): string {
@@ -57,4 +57,29 @@ test('sanitizeRichText keeps formatting and removes script vectors', () => {
         assert.ok(!html.includes(banned), `should not contain ${banned}`);
     }
     assert.equal(sanitizeRichText(undefined), '');
+});
+
+const fakeWebview = { cspSource: 'vscode-resource:' } as any;
+
+test('with a nonce, the CSP runs only scripts that carry it', () => {
+    const csp = webviewCsp(fakeWebview, 'abc123');
+    assert.match(csp, /script-src 'nonce-abc123';/);
+    assert.doesNotMatch(csp.split('script-src')[1], /unsafe-inline/);
+});
+
+test('without a nonce, the CSP still allows inline script for older pages', () => {
+    assert.match(webviewCsp(fakeWebview), /script-src vscode-resource: 'unsafe-inline';/);
+});
+
+test('jsArg output is a valid JSON argument list entry after attribute decoding', () => {
+    const value = `it's "quoted" </script> & more`;
+    const decoded = `[${jsArg(value)}]`.replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    assert.deepEqual(JSON.parse(decoded), [value]);
+    assert.doesNotMatch(jsArg(value), /'/);
+});
+
+test('nonces are long, URL-safe and different each time', () => {
+    const a = getNonce();
+    assert.match(a, /^[A-Za-z0-9]{16,}$/);
+    assert.notEqual(a, getNonce());
 });
