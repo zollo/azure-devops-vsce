@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { WorkItemProvider } from './workItemProvider';
 import { BacklogProvider } from './backlogProvider';
 import { BoardProvider } from './boardProvider';
@@ -117,7 +118,7 @@ export class OverviewProvider implements vscode.TreeDataProvider<SectionItem>, v
 
             vscode.window.showInformationMessage(`Sections reordered`);
         } catch (error) {
-            console.error('Error during drop:', error);
+            log.error('Error during drop:', error);
         }
     }
 

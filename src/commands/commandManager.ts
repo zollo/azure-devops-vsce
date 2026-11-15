@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { notifyBulkResult, notifySuccess } from '../utils/notify';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItemProvider } from '../views/workItemProvider';
@@ -1174,7 +1175,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                         successCount++;
                     } catch (error) {
                         errorCount++;
-                        console.error(`Failed to update work item ${uniqueIds[i]}:`, error);
+                        log.error(`Failed to update work item ${uniqueIds[i]}:`, error);
                     }
                 }
             });
@@ -1277,7 +1278,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                         successCount++;
                     } catch (error) {
                         errorCount++;
-                        console.error(`Failed to assign work item ${uniqueIds[i]}:`, error);
+                        log.error(`Failed to assign work item ${uniqueIds[i]}:`, error);
                     }
                 }
             });
@@ -1375,7 +1376,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                         successCount++;
                     } catch (error) {
                         errorCount++;
-                        console.error(`Failed to move work item ${uniqueIds[i]}:`, error);
+                        log.error(`Failed to move work item ${uniqueIds[i]}:`, error);
                     }
                 }
             });
@@ -1964,7 +1965,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
                                 return;
                             }
                         } catch (error) {
-                            console.error('Failed to create PR via API:', error);
+                            log.error('Failed to create PR via API:', error);
                         }
                     }
                 }

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { applyLoadError, describeLoadError } from './loadErrors';
 
@@ -69,7 +70,7 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
                 }
             }
         } catch (error: any) {
-            console.error('Failed to load boards:', error?.message || error);
+            log.error('Failed to load boards:', error?.message || error);
             this.boards = [];
             this.boardsError = error;
         }
@@ -107,9 +108,9 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
                 this.currentIterationPath = currentIter.path;
             }
 
-            console.log('[BoardProvider] Loaded', this.teamIterations.length, 'team iterations');
+            log.debug('[BoardProvider] Loaded', this.teamIterations.length, 'team iterations');
         } catch (error: any) {
-            console.error('Failed to load team iterations:', error?.message || error);
+            log.error('Failed to load team iterations:', error?.message || error);
         }
     }
 
@@ -136,9 +137,9 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
                 uniqueName: member.identity.uniqueName
             }));
 
-            console.log('[BoardProvider] Loaded', this.teamMembers.length, 'team members');
+            log.debug('[BoardProvider] Loaded', this.teamMembers.length, 'team members');
         } catch (error: any) {
-            console.error('Failed to load team members:', error?.message || error);
+            log.error('Failed to load team members:', error?.message || error);
         }
     }
 
@@ -211,8 +212,8 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
             // Extract columns from response (includes id, name, columnType, itemLimit, stateMappings)
             const columns = response.data.value || [];
 
-            console.log('[BoardProvider] Loaded', columns.length, 'columns for board', boardId);
-            console.log('[BoardProvider] Column details:', columns.map((c: any) => ({
+            log.debug('[BoardProvider] Loaded', columns.length, 'columns for board', boardId);
+            log.debug('[BoardProvider] Column details:', columns.map((c: any) => ({
                 id: c.id,
                 name: c.name,
                 columnType: c.columnType
@@ -221,7 +222,7 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
             this.boardColumns.set(boardId, columns);
             return columns;
         } catch (error: any) {
-            console.error('Failed to load board columns:', error?.message || error);
+            log.error('Failed to load board columns:', error?.message || error);
             return [];
         }
     }
@@ -247,14 +248,14 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
             const columns = this.boardColumns.get(boardId) || [];
             const column = columns.find(c => c.name === columnName);
 
-            console.log('[BoardProvider] Loading work items for column:', columnName);
+            log.debug('[BoardProvider] Loading work items for column:', columnName);
 
             // Official Azure DevOps approach: Query by System.State (not System.BoardColumn)
             // System.BoardColumn is not documented as a standard queryable field
             // Reference: https://learn.microsoft.com/en-us/azure/devops/boards/queries/wiql-syntax
 
             if (!column?.stateMappings) {
-                console.log('[BoardProvider] Column has no state mappings');
+                log.debug('[BoardProvider] Column has no state mappings');
                 this.columnWorkItems.set(key, []);
                 return [];
             }
@@ -263,12 +264,12 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
             // Extract states from stateMappings (maps work item type -> state)
             const states = Object.values(column.stateMappings);
             if (states.length === 0) {
-                console.log('[BoardProvider] No states found in column state mappings');
+                log.debug('[BoardProvider] No states found in column state mappings');
                 this.columnWorkItems.set(key, []);
                 return [];
             }
 
-            console.log('[BoardProvider] Column state mappings:', column.stateMappings);
+            log.debug('[BoardProvider] Column state mappings:', column.stateMappings);
 
             // Build state filter for WIQL
             const stateConditions = states
@@ -313,7 +314,7 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
                           ${assigneeFilter}
                           ORDER BY [Microsoft.VSTS.Common.BacklogPriority] ASC`;
 
-            console.log('[BoardProvider] WIQL query:', wiql);
+            log.debug('[BoardProvider] WIQL query:', wiql);
 
             // Execute WIQL query
             const wiqlResponse = await axiosInstance.post(
@@ -323,7 +324,7 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
             );
 
             const workItemRefs = wiqlResponse.data.workItems || [];
-            console.log('[BoardProvider] WIQL query returned', workItemRefs.length, 'work item references');
+            log.debug('[BoardProvider] WIQL query returned', workItemRefs.length, 'work item references');
 
             if (workItemRefs.length === 0) {
                 this.columnWorkItems.set(key, []);
@@ -340,7 +341,7 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
             });
 
             let filteredWorkItems = detailsResponse.data.value || [];
-            console.log('[BoardProvider] Fetched details for', filteredWorkItems.length, 'work items');
+            log.debug('[BoardProvider] Fetched details for', filteredWorkItems.length, 'work items');
 
             // Filter to match exact type+state combination for this column
             // This prevents showing items from other columns with overlapping states
@@ -351,18 +352,18 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
 
                 const matches = expectedState === itemState;
                 if (!matches) {
-                    console.log(`[BoardProvider] Filtered out item ${item.id}: type="${itemType}", state="${itemState}", expected="${expectedState}"`);
+                    log.debug(`[BoardProvider] Filtered out item ${item.id}: type="${itemType}", state="${itemState}", expected="${expectedState}"`);
                 }
                 return matches;
             });
 
-            console.log(`[BoardProvider] After type+state filtering: ${filteredWorkItems.length} work items for column "${columnName}"`);
+            log.debug(`[BoardProvider] After type+state filtering: ${filteredWorkItems.length} work items for column "${columnName}"`);
 
             // Filters are already applied in the WIQL query
             this.columnWorkItems.set(key, filteredWorkItems);
             return filteredWorkItems;
         } catch (error: any) {
-            console.error('Failed to load column work items:', error?.message || error);
+            log.error('Failed to load column work items:', error?.message || error);
             return [];
         }
     }

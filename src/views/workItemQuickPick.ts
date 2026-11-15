@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { WorkItem } from '../models/workItem';
 import { SearchService } from '../services/searchService';
 import { AuthenticationManager } from '../authentication/authenticationManager';
@@ -110,7 +111,7 @@ export class WorkItemQuickPick {
                 ...recentItems.map(item => this.formatWorkItem(item))
             ];
         } catch (error: any) {
-            console.error('[WorkItemQuickPick] Failed to load recent items:', error);
+            log.error('[WorkItemQuickPick] Failed to load recent items:', error);
             this.quickPick.items = [{
                 label: '$(error) Failed to load recent items',
                 description: error?.message || 'Unknown error'
@@ -152,7 +153,7 @@ export class WorkItemQuickPick {
                 ...results.map(item => this.formatWorkItem(item))
             ];
         } catch (error: any) {
-            console.error('[WorkItemQuickPick] Search failed:', error);
+            log.error('[WorkItemQuickPick] Search failed:', error);
             this.quickPick.items = [{
                 label: '$(error) Search failed',
                 description: error?.message || 'Unknown error'

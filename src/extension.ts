@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log, setLogChannel } from './utils/logger';
 import { AuthenticationManager } from './authentication/authenticationManager';
 import { ConnectionStatusProvider } from './authentication/connectionStatusProvider';
 import { WorkItemProvider } from './views/workItemProvider';
@@ -27,7 +28,7 @@ export let gitIntegration: GitIntegration;
 export let statusBarManager: StatusBarManager;
 export let workItemLinksManager: WorkItemLinksManager;
 export let connectionStatusProvider: ConnectionStatusProvider;
-export let outputChannel: vscode.OutputChannel;
+export let outputChannel: vscode.LogOutputChannel;
 export let searchService: SearchService;
 export let activeWorkItemService: ActiveWorkItemService;
 
@@ -37,12 +38,12 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
     }
 
-    console.log('Azure DevOps Boards extension is now active!');
-
     // Initialize output channel
-    outputChannel = vscode.window.createOutputChannel('Azure DevOps');
+    // A log channel: the person picks the level in the Output panel; debug detail is hidden by default
+    outputChannel = vscode.window.createOutputChannel('Azure DevOps', { log: true });
     context.subscriptions.push(outputChannel);
-    outputChannel.appendLine('Azure DevOps Boards extension activated');
+    setLogChannel(outputChannel);
+    log.info('Azure DevOps Boards extension activated');
 
     // Initialize managers
     authenticationManager = new AuthenticationManager(context);
@@ -185,7 +186,7 @@ export async function activate(context: vscode.ExtensionContext) {
             statusBarManager.updateStatus('disconnected');
         }
     } catch (error) {
-        console.log('Auto-connect failed:', error);
+        log.debug('Auto-connect failed:', error);
         vscode.commands.executeCommand('setContext', 'azureDevOps.connected', false);
         statusBarManager.updateStatus('disconnected');
     }
@@ -210,11 +211,11 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.executeCommand('azureDevOps.showWhatsNew');
     }
 
-    console.log('Azure DevOps Boards extension initialized successfully');
+    log.debug('Azure DevOps Boards extension initialized successfully');
 }
 
 export function deactivate() {
-    console.log('Azure DevOps Boards extension deactivated');
+    log.debug('Azure DevOps Boards extension deactivated');
     if (gitIntegration) {
         gitIntegration.dispose();
     }

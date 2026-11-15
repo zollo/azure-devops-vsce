@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { notifySuccess } from '../utils/notify';
 import { vendorAssetUri } from '../utils/webviewAssets';
 import { escapeHtml, jsArg, sanitizeRichText, serializeForScript, webviewCsp } from '../utils/webviewSecurity';
@@ -332,8 +333,8 @@ export class WorkItemPanel {
                 ? { op: 'replace', path: fieldPath, value: value }
                 : { op: 'remove', path: fieldPath };
 
-            console.log(`[WorkItemPanel] Updating field ${field} with value:`, value);
-            console.log('[WorkItemPanel] Patch operation:', JSON.stringify(patchOp));
+            log.debug(`[WorkItemPanel] Updating field ${field} with value:`, value);
+            log.debug('[WorkItemPanel] Patch operation:', JSON.stringify(patchOp));
 
             const response = await axiosInstance.patch(
                 `/_apis/wit/workitems/${this._workItem.id}`,
@@ -344,7 +345,7 @@ export class WorkItemPanel {
                 }
             );
 
-            console.log('[WorkItemPanel] Update successful:', response.status);
+            log.debug('[WorkItemPanel] Update successful:', response.status);
 
             // Broadcast field update to all views
             this.eventManager.notifyWorkItemUpdated({
@@ -356,9 +357,9 @@ export class WorkItemPanel {
             notifySuccess('Field updated');
             await this.refreshWorkItem();
         } catch (error: any) {
-            console.error('[WorkItemPanel] Failed to update field:', error);
-            console.error('[WorkItemPanel] Error response:', error.response?.data);
-            console.error('[WorkItemPanel] Error status:', error.response?.status);
+            log.error('[WorkItemPanel] Failed to update field:', error);
+            log.error('[WorkItemPanel] Error response:', error.response?.data);
+            log.error('[WorkItemPanel] Error status:', error.response?.status);
             vscode.window.showErrorMessage(`Failed to update field: ${error.response?.data?.message || error.message}`);
         }
     }
@@ -623,7 +624,7 @@ export class WorkItemPanel {
             this._panel.title = WorkItemPanel.panelTitle(response.data);
             this._update();
         } catch (error) {
-            console.error('Failed to refresh:', error);
+            log.error('Failed to refresh:', error);
         }
     }
 
@@ -651,7 +652,7 @@ export class WorkItemPanel {
             try {
                 return await promise;
             } catch (error) {
-                console.error(`[WorkItemPanel] Failed to load ${what}:`, error);
+                log.error(`[WorkItemPanel] Failed to load ${what}:`, error);
                 return fallback;
             }
         };
@@ -681,7 +682,7 @@ export class WorkItemPanel {
             this._availableStates = availableStates;
             this._panel.webview.html = this._getHtmlForWebview(comments, linkedItems, attachments, currentUser);
         } catch (error: any) {
-            console.error('[WorkItemPanel] Failed to render work item:', error);
+            log.error('[WorkItemPanel] Failed to render work item:', error);
             if (generation === this._updateGeneration && !this._disposed) {
                 this._panel.webview.html = this._getErrorHtml(error?.message || String(error));
             }
@@ -798,7 +799,7 @@ export class WorkItemPanel {
                 // errorPolicy=omit returns null for items that were deleted or can't be read.
                 return (response.data.value || []).filter((item: any) => item && item.fields);
             },
-            error => console.error('[WorkItemPanel] Failed to load linked items:', error)
+            error => log.error('[WorkItemPanel] Failed to load linked items:', error)
         );
         const byId = new Map(linked.map((item: any) => [item.id, item]));
 
@@ -852,7 +853,7 @@ export class WorkItemPanel {
 
             return attachments;
         } catch (error) {
-            console.error('Failed to load attachments:', error);
+            log.error('Failed to load attachments:', error);
             return [];
         }
     }
@@ -880,7 +881,7 @@ export class WorkItemPanel {
 
             return iterations;
         } catch (error) {
-            console.error('Failed to load iterations:', error);
+            log.error('Failed to load iterations:', error);
             throw error;
         }
     }
@@ -919,7 +920,7 @@ export class WorkItemPanel {
 
             return areas;
         } catch (error) {
-            console.error('Failed to load areas:', error);
+            log.error('Failed to load areas:', error);
             throw error;
         }
     }
@@ -930,7 +931,7 @@ export class WorkItemPanel {
             const config = this.authenticationManager.getConfig();
 
             if (!axiosInstance || !config?.defaultProject) {
-                console.log('Team members: Missing config', { project: config?.defaultProject });
+                log.debug('Team members: Missing config', { project: config?.defaultProject });
                 return [];
             }
 
@@ -951,9 +952,9 @@ export class WorkItemPanel {
                     })).filter((m: TeamMemberInfo) => m.displayName && m.uniqueName);
 
                     members.push(...teamMembers);
-                    console.log(`Loaded ${teamMembers.length} team members from default team`);
+                    log.debug(`Loaded ${teamMembers.length} team members from default team`);
                 } catch (teamError) {
-                    console.error('Failed to load team members:', teamError);
+                    log.error('Failed to load team members:', teamError);
                 }
             }
 
@@ -992,18 +993,18 @@ export class WorkItemPanel {
                     }
                 }
             } catch (projectError) {
-                console.error('Failed to load project users:', projectError);
+                log.error('Failed to load project users:', projectError);
             }
 
-            console.log(`Total unique members: ${members.length}`);
+            log.debug(`Total unique members: ${members.length}`);
 
             // Filter to only show team members who have work items assigned to them
             const filteredMembers = await this.filterTeamMembersWithWorkItems(members, axiosInstance, config);
-            console.log(`Filtered to ${filteredMembers.length} members with work items`);
+            log.debug(`Filtered to ${filteredMembers.length} members with work items`);
 
             return filteredMembers.sort((a, b) => a.displayName.localeCompare(b.displayName));
         } catch (error) {
-            console.error('Failed to get team members:', error);
+            log.error('Failed to get team members:', error);
             throw error;
         }
     }
@@ -1023,7 +1024,7 @@ export class WorkItemPanel {
                 );
                 teamAreaPath = teamFieldValues.data?.defaultValue || '';
             } catch (error) {
-                console.log('Could not get team area path, will not filter by area');
+                log.debug('Could not get team area path, will not filter by area');
             }
 
             // Query for work items assigned to team members
@@ -1075,7 +1076,7 @@ export class WorkItemPanel {
             // Filter team members to only those with work items
             return members.filter(member => uniqueAssignees.has(member.uniqueName));
         } catch (error) {
-            console.error('Failed to filter team members:', error);
+            log.error('Failed to filter team members:', error);
             // Return all members if filtering fails
             return members;
         }
@@ -1100,7 +1101,7 @@ export class WorkItemPanel {
                 return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
             } catch (tagsError) {
                 // Older Azure DevOps Server versions lack the tags API; fall back to recent work items.
-                console.warn('[WorkItemPanel] Tags API unavailable, reading tags from recent work items:', (tagsError as any)?.message || tagsError);
+                log.warn('[WorkItemPanel] Tags API unavailable, reading tags from recent work items:', (tagsError as any)?.message || tagsError);
             }
 
             const wiql = `SELECT [System.Id], [System.Tags] FROM WorkItems WHERE [System.TeamProject] = @project ORDER BY [System.ChangedDate] DESC`;
@@ -1132,7 +1133,7 @@ export class WorkItemPanel {
 
             return Array.from(tagSet).sort();
         } catch (error) {
-            console.error('Failed to load existing tags:', error);
+            log.error('Failed to load existing tags:', error);
             throw error;
         }
     }
@@ -1163,7 +1164,7 @@ export class WorkItemPanel {
 
             return states.length > 0 ? states : ['New', 'Active', 'Resolved', 'Closed'];
         } catch (error) {
-            console.error('Failed to load available states:', error);
+            log.error('Failed to load available states:', error);
             throw error;
         }
     }

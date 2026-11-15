@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { fetchWorkItemsInBatches, LIST_FIELDS } from '../utils/workItemBatches';
 import { applyLoadError, describeLoadError } from './loadErrors';
@@ -67,7 +68,7 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
                 return bStart.getTime() - aStart.getTime();
             });
         } catch (error: any) {
-            console.error('Failed to load sprints:', error?.message || error);
+            log.error('Failed to load sprints:', error?.message || error);
             this.sprints = [];
             this.sprintsError = error;
         }
@@ -116,7 +117,7 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
                     return (detailsResponse.data.value || []).filter((item: any) => item);
                 },
                 error => {
-                    console.error('Failed to load a batch of sprint work items:', (error as any)?.message || error);
+                    log.error('Failed to load a batch of sprint work items:', (error as any)?.message || error);
                     batchError = batchError ?? error;
                 }
             );
@@ -126,7 +127,7 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
             this.sprintWorkItems.set(sprintId, workItems);
             return workItems;
         } catch (error: any) {
-            console.error('Failed to get sprint work items:', error?.message || error);
+            log.error('Failed to get sprint work items:', error?.message || error);
             this.sprintItemErrors.set(sprintId, error);
             return [];
         }
@@ -153,7 +154,7 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
             this.sprintCapacities.set(sprintId, capacity);
             return capacity;
         } catch (error: any) {
-            console.error('Failed to get sprint capacity:', error?.message || error);
+            log.error('Failed to get sprint capacity:', error?.message || error);
             return null;
         }
     }

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { notifySuccess } from '../utils/notify';
 import axios, { AxiosInstance } from 'axios';
 import { getOrMigratePat } from './patStorage';
@@ -90,7 +91,7 @@ export class AuthenticationManager {
         try {
             await Promise.all(updates);
         } catch (err) {
-            console.warn('[AuthManager] Failed to clear legacy PAT setting:', err);
+            log.warn('[AuthManager] Failed to clear legacy PAT setting:', err);
         }
     }
 
@@ -161,7 +162,7 @@ export class AuthenticationManager {
                 }
             }
         } catch (error) {
-            console.error('Failed to load configuration:', error);
+            log.error('Failed to load configuration:', error);
         }
     }
 
@@ -180,8 +181,7 @@ export class AuthenticationManager {
         // Add request interceptor to ensure api-version is always added
         this.axiosInstance.interceptors.request.use(
             async (config) => {
-                // Debug log
-                console.log('[Azure DevOps] Request URL:', (config.baseURL || '') + (config.url || ''));
+                log.trace(`[Azure DevOps] ${String(config.method || 'get').toUpperCase()} ${config.url || ''}`);
                 const accessToken = this.getActiveAccessToken();
                 if (accessToken) {
                     const headerValue = this.getAuthorizationHeader(accessToken);
@@ -238,9 +238,9 @@ export class AuthenticationManager {
                     this.connectionStatus.isConnected = false;
                     this.onDidDetectAuthFailureEmitter.fire();
                 } else if (status === 400) {
-                    console.error('Bad request:', error.response?.data);
+                    log.error('Bad request:', error.response?.data);
                 } else if (status === 404) {
-                    console.error('Resource not found:', error.config?.url);
+                    log.error('Resource not found:', error.config?.url);
                 }
                 return Promise.reject(error);
             }
@@ -287,7 +287,7 @@ export class AuthenticationManager {
             this.applyAccessToken(session);
             return true;
         } catch (error) {
-            console.warn('[AuthManager] Silent token refresh failed:', error);
+            log.warn('[AuthManager] Silent token refresh failed:', error);
             return false;
         }
     }
@@ -441,7 +441,7 @@ export class AuthenticationManager {
                 return true;
             }
         } catch (error: any) {
-            console.error('Auto-connect failed:', error.message || error);
+            log.error('Auto-connect failed:', error.message || error);
             this.connectionStatus.isConnected = false;
         }
 
@@ -617,7 +617,7 @@ export class AuthenticationManager {
     }
 
     public async disconnect(): Promise<void> {
-        console.log('[AuthManager] Disconnecting...');
+        log.debug('[AuthManager] Disconnecting...');
         await this.context.secrets.delete(AuthenticationManager.PAT_SECRET_KEY);
         if (this.session) {
             await this.context.secrets.delete('ado-session-id');
@@ -637,7 +637,7 @@ export class AuthenticationManager {
 
         vscode.commands.executeCommand('setContext', 'azureDevOps.signedIn', false);
         vscode.commands.executeCommand('setContext', 'azureDevOps.connected', false);
-        console.log('[AuthManager] Disconnected - azureDevOps.signedIn = false');
+        log.debug('[AuthManager] Disconnected - azureDevOps.signedIn = false');
         notifySuccess('Successfully signed out from Azure DevOps');
     }
 
@@ -685,7 +685,7 @@ export class AuthenticationManager {
                 }
             }
         } catch (error) {
-            console.error('Failed to restore session:', error);
+            log.error('Failed to restore session:', error);
         }
 
         return undefined;
@@ -694,16 +694,16 @@ export class AuthenticationManager {
     public async initialize(): Promise<void> {
         try {
             const session = await this.getSession();
-            console.log('[AuthManager] Initialize - Session exists:', !!session);
+            log.debug('[AuthManager] Initialize - Session exists:', !!session);
             if (session) {
                 vscode.commands.executeCommand('setContext', 'azureDevOps.signedIn', true);
-                console.log('[AuthManager] Set azureDevOps.signedIn = true');
+                log.debug('[AuthManager] Set azureDevOps.signedIn = true');
             } else {
                 vscode.commands.executeCommand('setContext', 'azureDevOps.signedIn', false);
-                console.log('[AuthManager] Set azureDevOps.signedIn = false');
+                log.debug('[AuthManager] Set azureDevOps.signedIn = false');
             }
         } catch (error) {
-            console.error('Failed to initialize authentication:', error);
+            log.error('Failed to initialize authentication:', error);
             vscode.commands.executeCommand('setContext', 'azureDevOps.signedIn', false);
         }
     }
@@ -785,7 +785,7 @@ export class AuthenticationManager {
             });
             return response.data.value || [];
         } catch (error) {
-            console.error('Failed to get projects:', error);
+            log.error('Failed to get projects:', error);
             throw error;
         }
     }
@@ -801,7 +801,7 @@ export class AuthenticationManager {
             });
             return response.data.value || [];
         } catch (error) {
-            console.error('Failed to get teams:', error);
+            log.error('Failed to get teams:', error);
             throw error;
         }
     }
@@ -874,7 +874,7 @@ export class AuthenticationManager {
                     azureTenants = tenantsResponse.data.value || [];
                 }
             } catch (azureError) {
-                console.log('Could not fetch Azure Management tenants, using Graph API only');
+                log.debug('Could not fetch Azure Management tenants, using Graph API only');
             }
 
             // Merge and deduplicate tenants
@@ -901,11 +901,11 @@ export class AuthenticationManager {
             });
 
             const tenants = Array.from(tenantMap.values());
-            console.log(`Found ${tenants.length} available tenants`);
+            log.debug(`Found ${tenants.length} available tenants`);
 
             return tenants;
         } catch (error: any) {
-            console.error('Failed to fetch tenants:', error);
+            log.error('Failed to fetch tenants:', error);
 
             // If fetching tenants fails, provide option to manually enter tenant ID
             vscode.window.showWarningMessage('Unable to automatically detect tenants. You can manually enter a tenant ID if needed.');
@@ -951,11 +951,11 @@ export class AuthenticationManager {
             const authenticatedUser = response.data.authenticatedUser;
 
             // Log the user data to diagnose the issue
-            console.log('[Auth] getCurrentUser response:', JSON.stringify(authenticatedUser, null, 2));
+            log.debug('[Auth] getCurrentUser response:', JSON.stringify(authenticatedUser, null, 2));
 
             return authenticatedUser;
         } catch (error) {
-            console.error('Failed to get current user:', error);
+            log.error('Failed to get current user:', error);
             throw error;
         }
     }

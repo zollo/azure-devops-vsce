@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { notifySuccess } from '../utils/notify';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem } from '../models/workItem';
@@ -263,7 +264,7 @@ export class WorkItemsListPanel {
 
             return result;
         } catch (error) {
-            console.error('Failed to load available states:', error);
+            log.error('Failed to load available states:', error);
             // Fallback to common states if API call fails
             return ['New', 'Active', 'Resolved', 'Closed'];
         }
@@ -545,7 +546,7 @@ export class WorkItemsListPanel {
 
                     teamMembers.forEach((m: {displayName: string, uniqueName: string}) => memberSet.set(m.uniqueName, m));
                 } catch (teamError) {
-                    console.error('Failed to load team members:', teamError);
+                    log.error('Failed to load team members:', teamError);
                 }
             }
 
@@ -577,7 +578,7 @@ export class WorkItemsListPanel {
                     additionalMembers.forEach((m: {displayName: string, uniqueName: string}) => memberSet.set(m.uniqueName, m));
                 });
             } catch (projectError) {
-                console.error('Failed to load project users:', projectError);
+                log.error('Failed to load project users:', projectError);
             }
 
             const members = Array.from(memberSet.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
@@ -587,7 +588,7 @@ export class WorkItemsListPanel {
 
             return members;
         } catch (error) {
-            console.error('Failed to get team members:', error);
+            log.error('Failed to get team members:', error);
             return [];
         }
     }
@@ -652,7 +653,7 @@ export class WorkItemsListPanel {
                         });
                         return detailsResponse.data.value || [];
                     } catch (error: any) {
-                        console.error(`Failed to load work items batch:`, error?.message || error);
+                        log.error(`Failed to load work items batch:`, error?.message || error);
                         return [];
                     }
                 });
@@ -663,7 +664,7 @@ export class WorkItemsListPanel {
 
             this.workItems = allWorkItems;
         } catch (error: any) {
-            console.error('Failed to load work items:', error?.message || error);
+            log.error('Failed to load work items:', error?.message || error);
             this.workItems = [];
         }
     }

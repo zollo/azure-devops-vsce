@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { notifySuccess } from '../utils/notify';
 import { vendorAssetUri } from '../utils/webviewAssets';
 import { extractWorkItemIdFromUrl } from '../utils/workItemUrls';
@@ -408,7 +409,7 @@ export class BoardPanel {
                 throw htmlError;
             }
         } catch (error: any) {
-            console.error('Failed to load board:', error);
+            log.error('Failed to load board:', error);
             outputChannel.appendLine(`[Board] Failed to load board: ${error.message || error}`);
 
             let message = 'Failed to Load Board';
@@ -529,7 +530,7 @@ export class BoardPanel {
                     return false;
                 }
             } catch (error) {
-                console.error('Failed to select team:', error);
+                log.error('Failed to select team:', error);
                 outputChannel.appendLine(`[Board] Failed to select team: ${error}`);
                 vscode.window.showErrorMessage('Failed to select team. Please try again.');
                 return false;
@@ -585,7 +586,7 @@ export class BoardPanel {
                 allowedWorkItemTypes = matchingBacklog.workItemTypes.map((wit: any) => wit.name);
             }
         } catch (error) {
-            console.error('Failed to load backlog configuration:', error);
+            log.error('Failed to load backlog configuration:', error);
             // Continue without filtering - will show all items
         }
 
@@ -716,7 +717,7 @@ export class BoardPanel {
             await this._loadChildWorkItems(workItemsMap, axiosInstance);
         } catch (error) {
             outputChannel.appendLine(`[Board] Failed to load child work items: ${error}`);
-            console.error('Failed to load child work items:', error);
+            log.error('Failed to load child work items:', error);
         }
 
         this.currentBoard = {
@@ -1351,7 +1352,7 @@ export class BoardPanel {
             }
         } catch (error: any) {
             outputChannel.appendLine(`[Board] Failed to load child work items: ${error?.message || error}`);
-            console.error('Failed to load child work items:', error);
+            log.error('Failed to load child work items:', error);
             // Clean up relations even on error
             for (const [, workItems] of workItemsMap.entries()) {
                 for (const workItem of workItems) {
@@ -1968,7 +1969,7 @@ export class BoardPanel {
             const config = this.authenticationManager.getConfig();
 
             if (!axiosInstance || !config?.defaultProject) {
-                console.log('Cannot get team members: missing config');
+                log.debug('Cannot get team members: missing config');
                 return [];
             }
 
@@ -1991,7 +1992,7 @@ export class BoardPanel {
                     outputChannel.appendLine(`[Board] Loaded ${teamMembers.length} team members from team "${config.defaultTeam}"`);
                 } catch (teamError) {
                     outputChannel.appendLine(`[Board] Failed to load team members: ${teamError}`);
-                    console.error('Failed to load team members:', teamError);
+                    log.error('Failed to load team members:', teamError);
                 }
             } else {
                 outputChannel.appendLine('[Board] No team configured, cannot load team members');
@@ -2000,7 +2001,7 @@ export class BoardPanel {
             outputChannel.appendLine(`[Board] Total team members: ${members.length}`);
             return members.sort((a, b) => a.displayName.localeCompare(b.displayName));
         } catch (error) {
-            console.error('Failed to get team members:', error);
+            log.error('Failed to get team members:', error);
             return [];
         }
     }
@@ -2043,7 +2044,7 @@ export class BoardPanel {
 
             return mapped;
         } catch (error) {
-            console.error('Failed to get team iterations:', error);
+            log.error('Failed to get team iterations:', error);
             outputChannel.appendLine(`[Board] Failed to get team iterations: ${error}`);
             return [];
         }
@@ -2055,7 +2056,7 @@ export class BoardPanel {
             const config = this.authenticationManager.getConfig();
 
             if (!axiosInstance || !config?.defaultProject || !config?.defaultTeam) {
-                console.log('Cannot get current iteration: missing config');
+                log.debug('Cannot get current iteration: missing config');
                 return null;
             }
 
@@ -2067,14 +2068,14 @@ export class BoardPanel {
             const iterations = response.data.value || [];
             if (iterations.length > 0) {
                 const currentIteration = iterations[0];
-                console.log('Current iteration:', currentIteration.name, currentIteration.path);
+                log.debug('Current iteration:', currentIteration.name, currentIteration.path);
                 return currentIteration.path;
             }
 
-            console.log('No current iteration found');
+            log.debug('No current iteration found');
             return null;
         } catch (error) {
-            console.error('Failed to get current iteration:', error);
+            log.error('Failed to get current iteration:', error);
             return null;
         }
     }
@@ -2117,7 +2118,7 @@ export class BoardPanel {
             outputChannel.appendLine('[Board] No team area path found in teamFieldValues response');
             return null;
         } catch (error: any) {
-            console.error('Failed to get team area path:', error);
+            log.error('Failed to get team area path:', error);
             outputChannel.appendLine(`[Board] Failed to get team area path: ${error?.message || error}`);
             if (error?.response?.data) {
                 outputChannel.appendLine(`[Board] Error details: ${JSON.stringify(error.response.data, null, 2)}`);
@@ -2211,10 +2212,10 @@ export class BoardPanel {
                 }
             } catch (error) {
                 // Silently fail if card rule settings are not available
-                console.error('Failed to fetch card rule settings:', error);
+                log.error('Failed to fetch card rule settings:', error);
             }
         } catch (error) {
-            console.error('Failed to fetch tag colors:', error);
+            log.error('Failed to fetch tag colors:', error);
         }
     }
 
@@ -2266,7 +2267,7 @@ export class BoardPanel {
                 this._projectWorkItemTypes = ['User Story', 'Bug', 'Task', 'Issue', 'Feature', 'Epic'];
             }
         } catch (error) {
-            console.error('Failed to fetch project work item types:', error);
+            log.error('Failed to fetch project work item types:', error);
             // Fallback to common types if API fails
             this._projectWorkItemTypes = ['User Story', 'Bug', 'Task', 'Issue', 'Feature', 'Epic'];
         }
@@ -6095,7 +6096,7 @@ export class BoardPanel {
             
             return matches.length > 0;
         } catch (error) {
-            console.error('Error evaluating card style rule:', error);
+            log.error('Error evaluating card style rule:', error);
             return false;
         }
     }

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { notifySuccess } from '../utils/notify';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem, WorkItemTypeEnum, WorkItemStateEnum } from '../models/workItem';
@@ -197,8 +198,8 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             wiql += ` ORDER BY [System.ChangedDate] DESC`;
 
             try {
-                console.log('[WorkItemProvider] WIQL Query:', wiql);
-                console.log('[WorkItemProvider] Filters - State:', this.filterState, 'Type:', this.filterType, 'AssignedToMe:', this.filterAssignedToMe);
+                log.debug('[WorkItemProvider] WIQL Query:', wiql);
+                log.debug('[WorkItemProvider] Filters - State:', this.filterState, 'Type:', this.filterType, 'AssignedToMe:', this.filterAssignedToMe);
             } catch (e) {
                 // Ignore console logging errors
             }
@@ -235,7 +236,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                     return (detailsResponse.data.value || []).filter((item: any) => item);
                 },
                 (error: any) => {
-                    console.error('Failed to load work items batch:', error?.message || error);
+                    log.error('Failed to load work items batch:', error?.message || error);
                     batchError = batchError ?? error;
                 }
             );
@@ -250,7 +251,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             // Cache the results
             this.cacheManager.set(cacheKey, this.workItems);
         } catch (error: any) {
-            console.error('Failed to load work items:', error?.message || error);
+            log.error('Failed to load work items:', error?.message || error);
             this.workItems = [];
             this.loadError = error;
         }
@@ -263,15 +264,15 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
     async getChildren(element?: WorkItemTreeItem): Promise<WorkItemTreeItem[]> {
         try {
             if (!this.authenticationManager.isConnected()) {
-                console.log('[WorkItemProvider] Not connected to Azure DevOps');
+                log.debug('[WorkItemProvider] Not connected to Azure DevOps');
                 return [];
             }
 
             if (!element) {
-                console.log('[WorkItemProvider] Loading root work items...');
+                log.debug('[WorkItemProvider] Loading root work items...');
                 await this.loadWorkItems();
 
-                console.log('[WorkItemProvider] Loaded', this.workItems.length, 'work items');
+                log.debug('[WorkItemProvider] Loaded', this.workItems.length, 'work items');
 
                 if (this.loadError) {
                     return [applyLoadError(
@@ -287,7 +288,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
 
                 // Group based on selected option
                 const grouped = this.groupWorkItems();
-                console.log('[WorkItemProvider] Created', grouped.length, 'groups');
+                log.debug('[WorkItemProvider] Created', grouped.length, 'groups');
                 return grouped;
             } else if (element.contextValue === 'workItemGroup') {
             // Show work items in this group
@@ -330,7 +331,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
 
             return [];
         } catch (error: any) {
-            console.error('[WorkItemProvider] Error in getChildren:', error);
+            log.error('[WorkItemProvider] Error in getChildren:', error);
             return [new WorkItemTreeItem(`Error: ${error?.message || error}`, vscode.TreeItemCollapsibleState.None)];
         }
     }
@@ -493,7 +494,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                 return treeItem;
             });
         } catch (error) {
-            console.error('Failed to load child work items:', error);
+            log.error('Failed to load child work items:', error);
             return [];
         }
     }
@@ -728,7 +729,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             });
             return response.data;
         } catch (error) {
-            console.error(`Failed to get work item ${id}:`, error);
+            log.error(`Failed to get work item ${id}:`, error);
             return null;
         }
     }
@@ -776,7 +777,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             this.refresh();
             return response.data;
         } catch (error) {
-            console.error('Failed to create work item:', error);
+            log.error('Failed to create work item:', error);
             vscode.window.showErrorMessage(`Failed to create work item: ${error}`);
             return null;
         }
@@ -837,7 +838,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
 
             return false;
         } catch (error) {
-            console.error(`Failed to update work item ${id}:`, error);
+            log.error(`Failed to update work item ${id}:`, error);
             return false;
         }
     }
@@ -928,7 +929,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                             fieldValue = iteration.path;
                         }
                     } catch (e) {
-                        console.error('Failed to get iteration path:', e);
+                        log.error('Failed to get iteration path:', e);
                         return;
                     }
                 } else if (groupName === 'No Sprint') {
@@ -961,7 +962,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                 );
                 successCount++;
             } catch (error) {
-                console.error(`Failed to update work item ${item.id}:`, error);
+                log.error(`Failed to update work item ${item.id}:`, error);
             }
         }
 
@@ -1011,10 +1012,10 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                         );
                         successCount++;
                     } catch (e2) {
-                        console.error(`Failed to update priority for work item ${item.id}:`, e2);
+                        log.error(`Failed to update priority for work item ${item.id}:`, e2);
                     }
                 } else {
-                    console.error(`Failed to update priority for work item ${item.id}:`, error);
+                    log.error(`Failed to update priority for work item ${item.id}:`, error);
                 }
             }
         }

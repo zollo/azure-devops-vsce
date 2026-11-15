@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from './logger';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 
 export interface WorkItemLink {
@@ -53,7 +54,7 @@ export class WorkItemLinksManager {
 
             return linkedItems;
         } catch (error) {
-            console.error('Failed to get linked work items:', error);
+            log.error('Failed to get linked work items:', error);
             return [];
         }
     }
@@ -81,7 +82,7 @@ export class WorkItemLinksManager {
 
             return true;
         } catch (error) {
-            console.error('Failed to add link:', error);
+            log.error('Failed to add link:', error);
             return false;
         }
     }
@@ -118,7 +119,7 @@ export class WorkItemLinksManager {
 
             return true;
         } catch (error) {
-            console.error('Failed to remove link:', error);
+            log.error('Failed to remove link:', error);
             return false;
         }
     }
@@ -152,7 +153,7 @@ export class WorkItemLinksManager {
 
             return detailsResponse.data.value || [];
         } catch (error) {
-            console.error('Failed to search work items:', error);
+            log.error('Failed to search work items:', error);
             return [];
         }
     }

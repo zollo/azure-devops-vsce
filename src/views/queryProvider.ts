@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/logger';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { LIST_FIELDS, MAX_IDS_PER_REQUEST } from '../utils/workItemBatches';
 import { applyLoadError, describeLoadError } from './loadErrors';
@@ -65,7 +66,7 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
 
             this.queries = this.parseQueryHierarchy(response.data.value || []);
         } catch (error: any) {
-            console.error('Failed to load queries:', error?.message || error);
+            log.error('Failed to load queries:', error?.message || error);
             this.queries = [];
             this.queriesError = error;
         }
@@ -214,7 +215,7 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
 
             return results;
         } catch (error) {
-            console.error('Failed to run query:', error);
+            log.error('Failed to run query:', error);
             vscode.window.showErrorMessage(`Failed to run query: ${error}`);
             return [];
         }
@@ -256,7 +257,7 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
 
             return (detailsResponse.data.value || []).filter((item: any) => item);
         } catch (error) {
-            console.error('Failed to run custom query:', error);
+            log.error('Failed to run custom query:', error);
             return [];
         }
     }
