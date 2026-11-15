@@ -2620,7 +2620,10 @@ export class BoardPanel {
 
         // Check if any card styling rules apply to this work item
         const cardBackgroundColor = safeCssColor(this._getCardBackgroundColor(item));
-        const cardStyle = cardBackgroundColor ? `style="background-color: ${cardBackgroundColor} !important;"` : '';
+        // Cards a styling rule fills get text that contrasts with the fill, not the theme's
+        const cardStyle = cardBackgroundColor
+            ? `style="background-color: ${cardBackgroundColor} !important; --card-fg: ${this._getContrastTextColor(cardBackgroundColor)};"`
+            : '';
         const hasChildren = item.children && item.children.length > 0;
 
         return `

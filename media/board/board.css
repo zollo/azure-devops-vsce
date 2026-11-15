@@ -7,7 +7,7 @@
 body {
     font-family: var(--vscode-font-family);
     background: var(--vscode-editor-background);
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
     overflow-x: auto;
     min-height: 100vh;
 }
@@ -250,13 +250,13 @@ body {
 
 .collapse-btn:hover {
     background: var(--vscode-toolbar-hoverBackground);
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
 }
 
 .column-title {
     font-size: 13px;
     font-weight: 600;
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
 }
 
 .column-header-right {
@@ -281,7 +281,7 @@ body {
 
 .add-item-header-btn:hover {
     background: var(--vscode-list-hoverBackground);
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
     border-color: var(--vscode-focusBorder);
 }
 
@@ -464,13 +464,13 @@ body {
 .wip-badge.warning {
     background: var(--vscode-inputValidation-warningBackground, var(--vscode-badge-background));
     border: 1px solid var(--vscode-inputValidation-warningBorder, transparent);
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
 }
 
 .wip-badge.danger {
     background: var(--vscode-inputValidation-errorBackground, var(--vscode-badge-background));
     border: 1px solid var(--vscode-inputValidation-errorBorder, transparent);
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
 }
 
 .column-body {
@@ -503,7 +503,8 @@ body {
     transition: all 0.2s ease;
     position: relative;
     box-shadow: 0 1px 3px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
-    color: var(--vscode-foreground);
+    /* --card-fg is set on cards that a styling rule fills, to a color that contrasts with the fill */
+    color: var(--card-fg, var(--vscode-foreground));
 }
 
 .card.has-children {
@@ -585,7 +586,7 @@ body {
 .card-menu-btn {
     background: transparent;
     border: none;
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
     cursor: pointer;
     padding: 4px 8px;
     border-radius: 4px;
@@ -614,7 +615,7 @@ body {
 .card-id {
     font-size: 13px;
     font-weight: 600;
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
     cursor: pointer;
 }
 
@@ -624,7 +625,7 @@ body {
 
 .card-title {
     font-size: 13px;
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
     line-height: 1.4;
     word-wrap: break-word;
 }
@@ -672,7 +673,7 @@ body {
 
 .status-label {
     font-size: 12px;
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
 }
 
 /* Assignee */
@@ -711,11 +712,11 @@ body {
 
 .card-assignee-name {
     font-size: 12px;
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
 }
 
 .card-assignee-name.unassigned-text {
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
     opacity: 0.6;
     font-style: italic;
 }
@@ -727,11 +728,12 @@ body {
     gap: 8px;
     margin-bottom: 8px;
     font-size: 12px;
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
 }
 
 .card-effort-label {
-    color: var(--vscode-descriptionForeground);
+    color: var(--card-fg, var(--vscode-descriptionForeground));
+    opacity: 0.8;
     flex-shrink: 0;
 }
 
@@ -804,7 +806,7 @@ body {
     align-items: center;
     gap: 4px;
     font-size: 11px;
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
     font-weight: 500;
     cursor: pointer;
     padding: 4px 6px;
@@ -859,7 +861,7 @@ body {
     gap: 6px;
     background: transparent;
     border: none;
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
     padding: 5px 8px;
     border-radius: 3px;
     cursor: pointer;
@@ -974,7 +976,7 @@ body {
 
 .checklist-avatar.unassigned {
     background-color: var(--vscode-input-background);
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
     border: 1px solid var(--vscode-input-border);
 }
 
@@ -982,7 +984,7 @@ body {
 .checklist-title {
     flex: 1;
     font-size: 13px;
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
     cursor: pointer;
     user-select: none;
     text-decoration: underline;
@@ -991,17 +993,17 @@ body {
 }
 
 .checklist-title:hover {
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
 }
 
 .checklist-title.done {
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
 }
 
 .card-effort-toggle {
     background: transparent;
     border: 1px solid var(--vscode-input-border);
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
     cursor: pointer;
     padding: 4px 8px;
     border-radius: 4px;
@@ -1329,7 +1331,7 @@ body {
 }
 
 .filter-clear-btn:not(:disabled) {
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
 }
 
 .filter-clear-btn:not(:disabled):hover {
@@ -1368,7 +1370,7 @@ body {
     background: transparent;
     border: 1px solid var(--vscode-input-border);
     border-radius: 4px;
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
     font-size: 12px;
     cursor: pointer;
     transition: all 0.15s;
@@ -1402,7 +1404,7 @@ body {
 }
 
 .filter-count strong {
-    color: var(--vscode-foreground);
+    color: var(--card-fg, var(--vscode-foreground));
 }
 
 /* Hidden card when filtered */

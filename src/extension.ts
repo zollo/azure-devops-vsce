@@ -191,6 +191,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Connecting waits on the network, so it runs after activation returns: commands and views
     // are ready at once, and they fill in when the connection is up.
+    // The check and re-authenticate commands are registered now so they work while connecting;
+    // the monitor's own checks start once auto-connect is done, so the two don't race.
+    const connectionMonitor = startConnectionMonitor(context, authenticationManager, statusBarManager, refreshAll, health => connectionStatusProvider.setHealth(health), false);
+
     const activatedAt = Date.now();
     const finishStartup = async () => {
         // Try to auto-connect if credentials are available
@@ -233,7 +237,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
         // Watch the connection in the background: refresh expired tokens silently, ask the
         // user to sign in again when that is not possible, and recover after outages.
-        startConnectionMonitor(context, authenticationManager, statusBarManager, refreshAll, health => connectionStatusProvider.setHealth(health));
+        connectionMonitor.start();
 
         // New installs and empty configurations get the Get Started wizard (with What's new);
         // configured users get only What's new, once per release.

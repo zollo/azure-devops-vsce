@@ -1006,8 +1006,16 @@ export class WorkItemsListPanel {
         th[aria-sort="none"] .sort-icon { visibility: hidden; }
         .compact-label { display: none; }
         /* Narrow panels: the assignee column shows only the avatar */
+        /* Hidden visually but kept for screen readers, which still read the full name */
         .wi-table.compact-assignedTo th[data-col="assignedTo"] .col-label,
-        .wi-table.compact-assignedTo td[data-col="assignedTo"] .truncate { display: none; }
+        .wi-table.compact-assignedTo td[data-col="assignedTo"] .truncate {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+        }
         .wi-table.compact-assignedTo th[data-col="assignedTo"] .compact-label { display: inline; }
         ${columnVisibilityCss('.wi-table')}
         /* Keep the selection column in view when the table scrolls sideways */
@@ -1641,8 +1649,13 @@ export class WorkItemsListPanel {
                     if (!fresh) return;
                     const existing = tbody.querySelector('tr[data-id="' + Number(update.id) + '"]');
                     if (existing) {
+                        // Keep its place in the query order, so turning sorting off still restores it
+                        if (existing.dataset.order !== undefined) fresh.dataset.order = existing.dataset.order;
                         existing.replaceWith(fresh);
                     } else {
+                        // New rows go first in the query order too
+                        const orders = Array.from(tbody.children).map(r => Number(r.dataset.order)).filter(n => !isNaN(n));
+                        if (orders.length) fresh.dataset.order = String(Math.min.apply(null, orders) - 1);
                         tbody.prepend(fresh);
                     }
                     if (selectedIds.has(Number(update.id))) {

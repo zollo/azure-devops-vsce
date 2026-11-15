@@ -17,6 +17,8 @@ let originalColumn = null;
 let selectedCard = null;
 let keyboardMoveMode = false;
 let keyboardMoveOrigin = null;
+// The card being moved with the keyboard; selection can't change it mid-move
+let movingCard = null;
 let contextMenuWorkItemId = null;
 // Where focus goes back to when a menu closes
 let menuReturnFocus = null;
@@ -135,11 +137,12 @@ function handleGlobalKeydown(event) {
             break;
         case 'ArrowUp':
             event.preventDefault();
-            navigateCards(-1);
+            // While moving, up and down would select another card; the move stays on one card
+            if (!keyboardMoveMode) navigateCards(-1);
             break;
         case 'ArrowDown':
             event.preventDefault();
-            navigateCards(1);
+            if (!keyboardMoveMode) navigateCards(1);
             break;
         case 'ArrowLeft':
             event.preventDefault();
@@ -161,6 +164,10 @@ function handleGlobalKeydown(event) {
 }
 
 function selectCard(card) {
+    // Selecting another card (by mouse or Tab) ends a keyboard move and puts the card back
+    if (keyboardMoveMode && card !== movingCard) {
+        cancelKeyboardMove(false);
+    }
     if (selectedCard) {
         selectedCard.classList.remove('selected');
     }
@@ -216,9 +223,10 @@ function navigateColumns(direction) {
 function startKeyboardMove() {
     if (!selectedCard) return;
     keyboardMoveMode = true;
-    keyboardMoveOrigin = { parent: selectedCard.parentElement, next: selectedCard.nextSibling };
-    selectedCard.classList.add('keyboard-moving');
-    selectedCard.setAttribute('aria-grabbed', 'true');
+    movingCard = selectedCard;
+    keyboardMoveOrigin = { parent: movingCard.parentElement, next: movingCard.nextSibling };
+    movingCard.classList.add('keyboard-moving');
+    movingCard.setAttribute('aria-grabbed', 'true');
     showToast('Move mode: Use ← → to move, Enter to confirm, Esc to cancel', 'info');
 }
 
@@ -227,23 +235,26 @@ function columnName(card) {
     return column ? column.dataset.column : '';
 }
 
-function cancelKeyboardMove() {
+function cancelKeyboardMove(refocus) {
     keyboardMoveMode = false;
-    if (selectedCard) {
-        selectedCard.classList.remove('keyboard-moving');
-        selectedCard.removeAttribute('aria-grabbed');
+    const card = movingCard;
+    movingCard = null;
+    if (card) {
+        card.classList.remove('keyboard-moving');
+        card.removeAttribute('aria-grabbed');
         // Put the card back where it started
-        if (keyboardMoveOrigin && keyboardMoveOrigin.parent && selectedCard.parentElement !== keyboardMoveOrigin.parent) {
-            keyboardMoveOrigin.parent.insertBefore(selectedCard, keyboardMoveOrigin.next);
+        if (keyboardMoveOrigin && keyboardMoveOrigin.parent && card.parentElement !== keyboardMoveOrigin.parent) {
+            keyboardMoveOrigin.parent.insertBefore(card, keyboardMoveOrigin.next);
             updateColumnCounts();
         }
-        selectedCard.focus({ preventScroll: true });
+        if (refocus !== false) card.focus({ preventScroll: true });
     }
     keyboardMoveOrigin = null;
     showToast('Move cancelled', 'info');
 }
 
 function moveCardToColumn(direction) {
+    const selectedCard = movingCard;
     if (!selectedCard) return;
 
     const columns = Array.from(document.querySelectorAll('.column:not(.collapsed)'));
@@ -294,6 +305,7 @@ function moveCardToColumn(direction) {
 }
 
 function confirmKeyboardMove() {
+    const selectedCard = movingCard;
     if (!selectedCard || !keyboardMoveMode) return;
 
     const column = selectedCard.closest('.column');
@@ -322,6 +334,7 @@ function confirmKeyboardMove() {
 
     keyboardMoveMode = false;
     keyboardMoveOrigin = null;
+    movingCard = null;
     selectedCard.classList.remove('keyboard-moving');
     selectedCard.removeAttribute('aria-grabbed');
     announce('Moved to ' + targetColumn + '.');
@@ -375,7 +388,10 @@ function handleMenuKeydown(event) {
 function restoreMenuFocus() {
     const target = menuReturnFocus;
     menuReturnFocus = null;
-    if (target && document.contains(target)) {
+    // Only when focus is still in a menu or was dropped; a click into the search box keeps it
+    const active = document.activeElement;
+    const lost = !active || active === document.body || (active.closest && active.closest('[role="menu"]'));
+    if (lost && target && document.contains(target)) {
         target.focus({ preventScroll: true });
     }
 }

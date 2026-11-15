@@ -96,6 +96,11 @@ export class ConnectionMonitor {
         return this.health;
     }
 
+    /** True between start() and stop(). */
+    public isRunning(): boolean {
+        return this.running;
+    }
+
     /** Starts periodic checks. The first one runs right away. */
     public start(): void {
         if (this.running) {
