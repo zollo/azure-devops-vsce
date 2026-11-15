@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItemTypeEnum } from '../models/workItem';
+import { applyLoadError, describeLoadError } from './loadErrors';
 
 export class BacklogProvider implements vscode.TreeDataProvider<BacklogTreeItem> {
     private _onDidChangeTreeData = new vscode.EventEmitter<BacklogTreeItem | undefined | void>();
@@ -92,6 +93,11 @@ export class BacklogProvider implements vscode.TreeDataProvider<BacklogTreeItem>
             }
         } catch (error) {
             console.error('Failed to load backlogs:', error);
+            return [applyLoadError(
+                new BacklogTreeItem('', vscode.TreeItemCollapsibleState.None),
+                describeLoadError(error, element ? 'backlog items' : 'backlogs'),
+                'azureDevOps.refreshBacklogs'
+            )];
         }
 
         return [];

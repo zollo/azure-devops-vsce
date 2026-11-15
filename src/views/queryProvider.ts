@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { LIST_FIELDS, MAX_IDS_PER_REQUEST } from '../utils/workItemBatches';
+import { applyLoadError, describeLoadError } from './loadErrors';
 import { WorkItem } from '../models/workItem';
 
 export interface Query {
@@ -28,12 +29,15 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
         this.authenticationManager = authenticationManager;
     }
 
+    private queriesError: unknown;
+
     refresh(): void {
+        // getChildren reloads the queries; loading here as well made every refresh fetch them twice
         this._onDidChangeTreeData.fire();
-        this.loadQueries();
     }
 
     private async loadQueries(): Promise<void> {
+        this.queriesError = undefined;
         if (!this.authenticationManager.isConnected()) {
             this.queries = [];
             return;
@@ -63,6 +67,7 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
         } catch (error: any) {
             console.error('Failed to load queries:', error?.message || error);
             this.queries = [];
+            this.queriesError = error;
         }
     }
 
@@ -91,6 +96,14 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
         if (!element) {
             // Root level - show query folders
             await this.loadQueries();
+
+            if (this.queriesError) {
+                return [applyLoadError(
+                    new QueryTreeItem('', vscode.TreeItemCollapsibleState.None),
+                    describeLoadError(this.queriesError, 'queries'),
+                    'azureDevOps.refreshQueries'
+                )];
+            }
 
             if (this.queries.length === 0) {
                 return [new QueryTreeItem('No queries found', vscode.TreeItemCollapsibleState.None)];

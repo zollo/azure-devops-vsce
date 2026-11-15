@@ -437,7 +437,8 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
     // Refresh commands
     context.subscriptions.push(
         vscode.commands.registerCommand('azureDevOps.refresh', () => {
-            components.workItemProvider.refresh();
+            components.workItemProvider.forceRefresh();
+            components.backlogProvider.refresh();
             components.boardProvider.refresh();
             components.sprintProvider.refresh();
             components.queryProvider.refresh();
@@ -447,7 +448,14 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
 
     context.subscriptions.push(
         vscode.commands.registerCommand('azureDevOps.refreshWorkItems', () => {
-            components.workItemProvider.refresh();
+            // A refresh the user asks for skips the 5 minute cache
+            components.workItemProvider.forceRefresh();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('azureDevOps.refreshBacklogs', () => {
+            components.backlogProvider.refresh();
         })
     );
 

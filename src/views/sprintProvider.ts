@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { fetchWorkItemsInBatches, LIST_FIELDS } from '../utils/workItemBatches';
+import { applyLoadError, describeLoadError } from './loadErrors';
 
 export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<SprintTreeItem | undefined | void> = new vscode.EventEmitter<SprintTreeItem | undefined | void>();
@@ -11,6 +12,8 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
     private sprints: any[] = [];
     private sprintWorkItems: Map<string, any[]> = new Map();
     private sprintCapacities: Map<string, any> = new Map();
+    private sprintsError: unknown;
+    private sprintItemErrors: Map<string, unknown> = new Map();
 
     constructor(context: vscode.ExtensionContext, authenticationManager: AuthenticationManager) {
         this.context = context;
@@ -20,10 +23,12 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
     refresh(): void {
         this.sprintWorkItems.clear();
         this.sprintCapacities.clear();
+        this.sprintItemErrors.clear();
         this._onDidChangeTreeData.fire();
     }
 
     private async loadSprints(): Promise<void> {
+        this.sprintsError = undefined;
         if (!this.authenticationManager.isConnected()) {
             this.sprints = [];
             return;
@@ -64,6 +69,7 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
         } catch (error: any) {
             console.error('Failed to load sprints:', error?.message || error);
             this.sprints = [];
+            this.sprintsError = error;
         }
     }
 
@@ -71,6 +77,7 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
         if (this.sprintWorkItems.has(sprintId)) {
             return this.sprintWorkItems.get(sprintId) || [];
         }
+        this.sprintItemErrors.delete(sprintId);
 
         try {
             const axiosInstance = this.authenticationManager.getAxiosInstance();
@@ -91,6 +98,7 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
                 return [];
             }
 
+            let batchError: unknown;
             // The API takes at most 200 ids per request, so large sprints load in batches.
             const workItemIds: number[] = workItemRefs
                 .map((item: any) => item.target?.id)
@@ -107,12 +115,19 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
                     });
                     return (detailsResponse.data.value || []).filter((item: any) => item);
                 },
-                error => console.error('Failed to load a batch of sprint work items:', (error as any)?.message || error)
+                error => {
+                    console.error('Failed to load a batch of sprint work items:', (error as any)?.message || error);
+                    batchError = batchError ?? error;
+                }
             );
+            if (workItems.length === 0 && batchError) {
+                throw batchError;
+            }
             this.sprintWorkItems.set(sprintId, workItems);
             return workItems;
         } catch (error: any) {
             console.error('Failed to get sprint work items:', error?.message || error);
+            this.sprintItemErrors.set(sprintId, error);
             return [];
         }
     }
@@ -161,6 +176,14 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
             // Root level - show sprints
             await this.loadSprints();
 
+            if (this.sprintsError) {
+                return [applyLoadError(
+                    new SprintTreeItem('', vscode.TreeItemCollapsibleState.None),
+                    describeLoadError(this.sprintsError, 'sprints'),
+                    'azureDevOps.refreshSprints'
+                )];
+            }
+
             if (this.sprints.length === 0) {
                 return [new SprintTreeItem('No sprints found', vscode.TreeItemCollapsibleState.None)];
             }
@@ -208,6 +231,15 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
         } else if (element.contextValue === 'sprintWorkItems') {
             // Show work items grouped by type
             const workItems = await this.loadSprintWorkItems(element.sprintId!);
+
+            const itemsError = this.sprintItemErrors.get(element.sprintId!);
+            if (itemsError) {
+                return [applyLoadError(
+                    new SprintTreeItem('', vscode.TreeItemCollapsibleState.None),
+                    describeLoadError(itemsError, 'sprint work items'),
+                    'azureDevOps.refreshSprints'
+                )];
+            }
 
             if (workItems.length === 0) {
                 return [new SprintTreeItem('No work items in this sprint', vscode.TreeItemCollapsibleState.None)];

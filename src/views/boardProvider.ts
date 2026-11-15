@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { AuthenticationManager } from '../authentication/authenticationManager';
+import { applyLoadError, describeLoadError } from './loadErrors';
 
 export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<BoardTreeItem | undefined | void> = new vscode.EventEmitter<BoardTreeItem | undefined | void>();
@@ -28,7 +29,10 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
         this._onDidChangeTreeData.fire();
     }
 
+    private boardsError: unknown;
+
     private async loadBoards(): Promise<void> {
+        this.boardsError = undefined;
         if (!this.authenticationManager.isConnected()) {
             this.boards = [];
             return;
@@ -67,6 +71,7 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
         } catch (error: any) {
             console.error('Failed to load boards:', error?.message || error);
             this.boards = [];
+            this.boardsError = error;
         }
     }
 
@@ -393,6 +398,15 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
             filtersNode.iconPath = new vscode.ThemeIcon('filter');
             filtersNode.tooltip = 'Click to expand/collapse filters';
             items.push(filtersNode);
+
+            if (this.boardsError) {
+                items.push(applyLoadError(
+                    new BoardTreeItem('', vscode.TreeItemCollapsibleState.None),
+                    describeLoadError(this.boardsError, 'boards'),
+                    'azureDevOps.refreshBoards'
+                ));
+                return items;
+            }
 
             if (this.boards.length === 0) {
                 items.push(new BoardTreeItem('No boards found', vscode.TreeItemCollapsibleState.None));

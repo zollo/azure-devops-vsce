@@ -5,6 +5,7 @@ import { CacheManager } from '../utils/cacheManager';
 import { WorkItemEventManager } from '../events/workItemEventManager';
 import { METADATA_TTL_MS, metadataKey, sharedMetadataCache } from '../utils/metadataCache';
 import { fetchWorkItemsInBatches } from '../utils/workItemBatches';
+import { applyLoadError, describeLoadError } from './loadErrors';
 
 export type GroupByOption = 'type' | 'state' | 'assignedTo' | 'sprint' | 'none';
 
@@ -29,6 +30,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
     private cacheManager: CacheManager = new CacheManager();
     private eventManager = WorkItemEventManager.getInstance();
     private stateCategoryCache: Map<string, string> = new Map(); // Maps "workItemType:state" -> "category"
+    private loadError: unknown;
 
     constructor(context: vscode.ExtensionContext, authenticationManager: AuthenticationManager) {
         this.context = context;
@@ -142,6 +144,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
     }
 
     private async loadWorkItems(): Promise<void> {
+        this.loadError = undefined;
         if (!this.authenticationManager.isConnected()) {
             this.workItems = [];
             return;
@@ -215,6 +218,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             // Get detailed work item information (limit to maxItems)
             const workItemIdsToLoad = workItemRefs.slice(0, maxItems).map((item: any) => item.id);
 
+            let batchError: unknown;
             // Load in batches of 200 (Azure DevOps API limit), 3 at a time. Relations are
             // needed to show which items have children; links and other expansions are not.
             this.workItems = await fetchWorkItemsInBatches<any>(
@@ -229,8 +233,15 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                     });
                     return (detailsResponse.data.value || []).filter((item: any) => item);
                 },
-                (error: any) => console.error('Failed to load work items batch:', error?.message || error)
+                (error: any) => {
+                    console.error('Failed to load work items batch:', error?.message || error);
+                    batchError = batchError ?? error;
+                }
             );
+            // Every batch failed: report it rather than showing an empty list
+            if (this.workItems.length === 0 && batchError) {
+                throw batchError;
+            }
 
             // Prefetch state categories for all unique work item types
             await this.prefetchStateCategoriesForWorkItems();
@@ -240,6 +251,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
         } catch (error: any) {
             console.error('Failed to load work items:', error?.message || error);
             this.workItems = [];
+            this.loadError = error;
         }
     }
 
@@ -259,6 +271,14 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
                 await this.loadWorkItems();
 
                 console.log('[WorkItemProvider] Loaded', this.workItems.length, 'work items');
+
+                if (this.loadError) {
+                    return [applyLoadError(
+                        new WorkItemTreeItem('', vscode.TreeItemCollapsibleState.None),
+                        describeLoadError(this.loadError, 'work items'),
+                        'azureDevOps.refreshWorkItems'
+                    )];
+                }
 
                 if (this.workItems.length === 0) {
                     return [new WorkItemTreeItem('No work items found', vscode.TreeItemCollapsibleState.None)];
