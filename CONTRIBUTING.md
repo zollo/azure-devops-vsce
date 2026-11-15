@@ -84,6 +84,13 @@ Releases are automated with [release-please](https://github.com/googleapis/relea
 
 To force a specific version, add a commit with a `Release-As: X.Y.Z` footer.
 
+Prefer **Squash and merge** for normal pull requests, so each one becomes a single CHANGELOG
+entry named after its (checked) title. A merge commit repeats the PR title in its body, which
+release-please reads as a second change; the Release Please workflow drops those duplicates
+from the release PR's CHANGELOG and notes with `scripts/dedupe_changelog.py`, and CI fails if
+`CHANGELOG.md` still has any. Merge commits also list every review-fixup commit, so squash
+gives a cleaner changelog.
+
 ### Manual release (fallback)
 
 1. Update `version` in `package.json` and `.release-please-manifest.json`, and add a CHANGELOG

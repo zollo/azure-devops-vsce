@@ -34,6 +34,11 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Changelog checks
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          python3 scripts/dedupe_changelog.py --check CHANGELOG.md
+
       - name: Integration tests (VS Code 1.101)
         run: xvfb-run -a npm run test:integration
 
