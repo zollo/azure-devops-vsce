@@ -377,8 +377,8 @@
     "keybindings": [
       {
         "command": "azureDevOps.quickOpenWorkItem",
-        "key": "ctrl+shift+o",
-        "mac": "cmd+shift+o",
+        "key": "ctrl+alt+shift+o",
+        "mac": "cmd+alt+shift+o",
         "when": "azureDevOps.connected"
       }
     ],
