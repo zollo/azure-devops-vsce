@@ -7,7 +7,7 @@ import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem } from '../models/workItem';
 import { WorkItemEventManager } from '../events/workItemEventManager';
 import { METADATA_TTL_MS, metadataKey, sharedMetadataCache } from '../utils/metadataCache';
-import { fetchWorkItemsInBatches } from '../utils/workItemBatches';
+import { azureDevOps } from '../services/azureDevOpsService';
 
 interface IterationInfo {
     id: string;
@@ -725,12 +725,15 @@ export class WorkItemPanel {
     }
 
     // Team and project metadata is shared by every open work item panel for 10 minutes.
-    private getIterations(): Promise<IterationInfo[]> {
-        return sharedMetadataCache.getOrLoad(metadataKey('panel-iterations', ...this.metadataScope()), METADATA_TTL_MS, () => this.loadIterations());
+    private async getIterations(): Promise<IterationInfo[]> {
+        const iterations = await azureDevOps().getTeamIterations();
+        return iterations.map(({ id, name, path, startDate, finishDate }) => ({ id, name, path, startDate, finishDate }));
     }
 
-    private getAreas(): Promise<AreaInfo[]> {
-        return sharedMetadataCache.getOrLoad(metadataKey('panel-areas', ...this.metadataScope()), METADATA_TTL_MS, () => this.loadAreas());
+    private async getAreas(): Promise<AreaInfo[]> {
+        const { areaPaths } = await azureDevOps().getTeamFieldValues();
+        // The path doubles as the id, since team field values don't carry node ids
+        return areaPaths.map(path => ({ id: path, name: path.split('\\').pop() || path, path }));
     }
 
     private getTeamMembers(): Promise<TeamMemberInfo[]> {
@@ -749,8 +752,8 @@ export class WorkItemPanel {
     private async getAvailableStates(): Promise<string[]> {
         const workItemType = this._workItem?.fields['System.WorkItemType'];
         if (!workItemType) return [];
-        const [org, project] = this.metadataScope();
-        return sharedMetadataCache.getOrLoad(metadataKey('states', org, project, workItemType), METADATA_TTL_MS, () => this.loadAvailableStates(workItemType));
+        const states = await azureDevOps().getWorkItemTypeStates(workItemType);
+        return states.length > 0 ? states : ['New', 'Active', 'Resolved', 'Closed'];
     }
 
     /** The work item's relations, from the loaded item when it has them, otherwise fetched once. */
@@ -786,22 +789,13 @@ export class WorkItemPanel {
         if (links.length === 0) return [];
 
         // One request per 200 linked items instead of one per item.
-        const linked = await fetchWorkItemsInBatches(
-            links.map(link => link.id),
-            async batch => {
-                const response = await axiosInstance.get('/_apis/wit/workitems', {
-                    params: {
-                        ids: batch.join(','),
-                        fields: 'System.Title,System.State,System.WorkItemType',
-                        errorPolicy: 'omit',
-                        'api-version': '7.0'
-                    }
-                });
-                // errorPolicy=omit returns null for items that were deleted or can't be read.
-                return (response.data.value || []).filter((item: any) => item && item.fields);
-            },
-            error => log.error('[WorkItemPanel] Failed to load linked items:', error)
-        );
+        const linked = (await azureDevOps()
+            .getWorkItems(links.map(link => link.id), { fields: ['System.Title', 'System.State', 'System.WorkItemType'] })
+            .catch(error => {
+                log.error('[WorkItemPanel] Failed to load linked items:', error);
+                return [] as any[];
+            }))
+            .filter((item: any) => item.fields);
         const byId = new Map(linked.map((item: any) => [item.id, item]));
 
         return links
@@ -859,226 +853,35 @@ export class WorkItemPanel {
         }
     }
 
-    private async loadIterations(): Promise<IterationInfo[]> {
-        try {
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            const config = this.authenticationManager.getConfig();
-
-            if (!axiosInstance || !config?.defaultProject || !config?.defaultTeam) return [];
-
-            // Get team-specific iterations instead of all project iterations
-            const response = await axiosInstance.get(
-                `/${encodeURIComponent(config.defaultProject)}/${encodeURIComponent(config.defaultTeam)}/_apis/work/teamsettings/iterations`,
-                { params: { 'api-version': '7.1' } }
-            );
-
-            const iterations: IterationInfo[] = (response.data.value || []).map((iter: any) => ({
-                id: iter.id,
-                name: iter.name,
-                path: iter.path,
-                startDate: iter.attributes?.startDate,
-                finishDate: iter.attributes?.finishDate
-            }));
-
-            return iterations;
-        } catch (error) {
-            log.error('Failed to load iterations:', error);
-            throw error;
-        }
-    }
-
-    private async loadAreas(): Promise<AreaInfo[]> {
-        try {
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            const config = this.authenticationManager.getConfig();
-
-            if (!axiosInstance || !config?.defaultProject || !config?.defaultTeam) return [];
-
-            // Get team-specific area from team settings
-            const teamFieldValuesResponse = await axiosInstance.get(
-                `/${encodeURIComponent(config.defaultProject)}/${encodeURIComponent(config.defaultTeam)}/_apis/work/teamsettings/teamfieldvalues`,
-                { params: { 'api-version': '7.1' } }
-            );
-
-            const areas: AreaInfo[] = [];
-
-            // Get the team's area paths from team settings
-            const teamAreaValues = teamFieldValuesResponse.data.values || [];
-            teamAreaValues.forEach((areaValue: any) => {
-                const areaPath = areaValue.value;
-                if (areaPath) {
-                    // Extract the last segment as the name
-                    const pathSegments = areaPath.split('\\');
-                    const name = pathSegments[pathSegments.length - 1];
-
-                    areas.push({
-                        id: areaPath, // Use path as id since we don't have node id
-                        name: name,
-                        path: areaPath
-                    });
-                }
-            });
-
-            return areas;
-        } catch (error) {
-            log.error('Failed to load areas:', error);
-            throw error;
-        }
-    }
-
+    /** People to offer as assignees: project team members who have work assigned in the team's area. */
     private async loadTeamMembers(): Promise<TeamMemberInfo[]> {
-        try {
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            const config = this.authenticationManager.getConfig();
-
-            if (!axiosInstance || !config?.defaultProject) {
-                log.debug('Team members: Missing config', { project: config?.defaultProject });
-                return [];
-            }
-
-            const members: TeamMemberInfo[] = [];
-
-            // Try to get team members if team is configured
-            if (config.defaultTeam) {
-                try {
-                    const teamResponse = await axiosInstance.get(
-                        `/_apis/projects/${encodeURIComponent(config.defaultProject)}/teams/${encodeURIComponent(config.defaultTeam)}/members`,
-                        { params: { 'api-version': '7.0' } }
-                    );
-
-                    const teamMembers = (teamResponse.data.value || []).map((member: any) => ({
-                        id: member.identity?.id || '',
-                        displayName: member.identity?.displayName || '',
-                        uniqueName: member.identity?.uniqueName || ''
-                    })).filter((m: TeamMemberInfo) => m.displayName && m.uniqueName);
-
-                    members.push(...teamMembers);
-                    log.debug(`Loaded ${teamMembers.length} team members from default team`);
-                } catch (teamError) {
-                    log.error('Failed to load team members:', teamError);
-                }
-            }
-
-            // Also get all project users as a fallback/supplement
-            try {
-                const identitiesResponse = await axiosInstance.get(
-                    `/_apis/projects/${encodeURIComponent(config.defaultProject)}/teams`,
-                    { params: { 'api-version': '7.0' } }
-                );
-
-                // Get members from all teams in the project
-                const teams = identitiesResponse.data.value || [];
-                // Limit to the first 5 teams to avoid too many requests, and load them together
-                const teamMemberLists = await Promise.all(teams.slice(0, 5).map(async (team: any) => {
-                    try {
-                        const teamMembersResponse = await axiosInstance.get(
-                            `/_apis/projects/${encodeURIComponent(config.defaultProject ?? '')}/teams/${encodeURIComponent(team.id)}/members`,
-                            { params: { 'api-version': '7.0' } }
-                        );
-                        return (teamMembersResponse.data.value || []).map((member: any) => ({
-                            id: member.identity?.id || '',
-                            displayName: member.identity?.displayName || '',
-                            uniqueName: member.identity?.uniqueName || ''
-                        })).filter((m: TeamMemberInfo) => m.displayName && m.uniqueName) as TeamMemberInfo[];
-                    } catch (e) {
-                        return [] as TeamMemberInfo[]; // Skip this team if error
-                    }
-                }));
-
-                // Add unique members
-                const known = new Set(members.map(m => m.uniqueName));
-                for (const newMember of teamMemberLists.flat()) {
-                    if (!known.has(newMember.uniqueName)) {
-                        known.add(newMember.uniqueName);
-                        members.push(newMember);
-                    }
-                }
-            } catch (projectError) {
-                log.error('Failed to load project users:', projectError);
-            }
-
-            log.debug(`Total unique members: ${members.length}`);
-
-            // Filter to only show team members who have work items assigned to them
-            const filteredMembers = await this.filterTeamMembersWithWorkItems(members, axiosInstance, config);
-            log.debug(`Filtered to ${filteredMembers.length} members with work items`);
-
-            return filteredMembers.sort((a, b) => a.displayName.localeCompare(b.displayName));
-        } catch (error) {
-            log.error('Failed to get team members:', error);
-            throw error;
-        }
+        const members = await azureDevOps().getProjectMembers();
+        const filtered = await this.filterTeamMembersWithWorkItems(members);
+        log.debug(`[WorkItemPanel] ${filtered.length} of ${members.length} members have work items`);
+        return filtered;
     }
 
-    private async filterTeamMembersWithWorkItems(
-        members: TeamMemberInfo[],
-        axiosInstance: any,
-        config: any
-    ): Promise<TeamMemberInfo[]> {
+    private async filterTeamMembersWithWorkItems(members: TeamMemberInfo[]): Promise<TeamMemberInfo[]> {
         try {
-            // Get the team's area path to filter work items
-            let teamAreaPath = '';
-            try {
-                const teamFieldValues = await axiosInstance.get(
-                    `/${encodeURIComponent(config.defaultProject)}/${encodeURIComponent(config.defaultTeam)}/_apis/work/teamsettings/teamfieldvalues`,
-                    { params: { 'api-version': '7.1' } }
-                );
-                teamAreaPath = teamFieldValues.data?.defaultValue || '';
-            } catch (error) {
-                log.debug('Could not get team area path, will not filter by area');
-            }
-
-            // Query for work items assigned to team members
-            let areaFilter = '';
-            if (teamAreaPath) {
-                areaFilter = `AND [System.AreaPath] UNDER '${teamAreaPath.replace(/'/g, "''")}'`;
-            }
-
-            const wiql = `SELECT [System.Id], [System.AssignedTo]
-                          FROM WorkItems
-                          WHERE [System.TeamProject] = @project
-                          AND [System.AssignedTo] <> ''
-                          ${areaFilter}`;
-
-            const wiqlResponse = await axiosInstance.post(
-                `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql`,
-                { query: wiql },
-                { params: { 'api-version': '7.1', '$top': 200 } }
-            );
-
-            const workItemRefs = wiqlResponse.data.workItems || [];
-
-            if (workItemRefs.length === 0) {
+            const service = azureDevOps();
+            const teamAreaPath = (await service.getTeamFieldValues().catch(() => undefined))?.defaultValue ?? '';
+            const areaFilter = teamAreaPath ? `AND [System.AreaPath] UNDER '${teamAreaPath.replace(/'/g, "''")}'` : '';
+            const wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.AssignedTo] <> '' ${areaFilter}`;
+            const ids = await service.queryWorkItemIds(wiql, 200);
+            if (ids.length === 0) {
                 return members;
             }
-
-            // Fetch work item details to get assignees
-            const workItemIds = workItemRefs.map((ref: any) => ref.id).slice(0, 200); // Limit to 200 for performance
-            const detailsResponse = await axiosInstance.get(
-                `/${encodeURIComponent(config.defaultProject)}/_apis/wit/workitems`,
-                {
-                    params: {
-                        'ids': workItemIds.join(','),
-                        'fields': 'System.AssignedTo',
-                        'api-version': '7.1'
-                    }
+            const items = await service.getWorkItems(ids, { fields: ['System.AssignedTo'] });
+            const assignees = new Set<string>();
+            for (const item of items) {
+                const uniqueName = item.fields?.['System.AssignedTo']?.uniqueName;
+                if (uniqueName) {
+                    assignees.add(uniqueName);
                 }
-            );
-
-            // Collect unique assignees
-            const uniqueAssignees = new Set<string>();
-            (detailsResponse.data.value || []).forEach((item: any) => {
-                const assignedTo = item.fields?.['System.AssignedTo'];
-                if (assignedTo?.uniqueName) {
-                    uniqueAssignees.add(assignedTo.uniqueName);
-                }
-            });
-
-            // Filter team members to only those with work items
-            return members.filter(member => uniqueAssignees.has(member.uniqueName));
+            }
+            return members.filter(member => assignees.has(member.uniqueName));
         } catch (error) {
-            log.error('Failed to filter team members:', error);
-            // Return all members if filtering fails
+            log.error('[WorkItemPanel] Failed to filter team members, showing all:', error);
             return members;
         }
     }
@@ -1135,37 +938,6 @@ export class WorkItemPanel {
             return Array.from(tagSet).sort();
         } catch (error) {
             log.error('Failed to load existing tags:', error);
-            throw error;
-        }
-    }
-
-    private async loadAvailableStates(workItemType: string): Promise<string[]> {
-
-        try {
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            const config = this.authenticationManager.getConfig();
-
-            if (!axiosInstance || !config?.defaultProject) return [];
-
-            // Fetch work item type definition to get allowed states
-            const response = await axiosInstance.get(
-                `/${encodeURIComponent(config.defaultProject)}/_apis/wit/workitemtypes/${encodeURIComponent(workItemType)}`,
-                { params: { 'api-version': '7.0' } }
-            );
-
-            // Extract states from the workflow
-            const states: string[] = [];
-            if (response.data.states && Array.isArray(response.data.states)) {
-                response.data.states.forEach((stateObj: any) => {
-                    if (stateObj.name) {
-                        states.push(stateObj.name);
-                    }
-                });
-            }
-
-            return states.length > 0 ? states : ['New', 'Active', 'Resolved', 'Closed'];
-        } catch (error) {
-            log.error('Failed to load available states:', error);
             throw error;
         }
     }

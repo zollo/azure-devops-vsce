@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { log } from '../utils/logger';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { applyLoadError, describeLoadError } from './loadErrors';
+import { azureDevOps } from '../services/azureDevOpsService';
 
 export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<BoardTreeItem | undefined | void> = new vscode.EventEmitter<BoardTreeItem | undefined | void>();
@@ -76,70 +77,23 @@ export class BoardProvider implements vscode.TreeDataProvider<BoardTreeItem> {
         }
     }
 
-    /**
-     * Load all team iterations from Azure DevOps API
-     * API Reference: https://learn.microsoft.com/en-us/rest/api/azure/devops/work/iterations/list
-     */
+    /** Loads the team's iterations (shared, cached) and notes the current one. */
     private async loadTeamIterations(): Promise<void> {
         try {
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            const config = this.authenticationManager.getConfig();
-
-            if (!axiosInstance || !config?.defaultProject || !config?.defaultTeam) {
-                return;
-            }
-
-            // Get all team iterations
-            const response = await axiosInstance.get(
-                `/${encodeURIComponent(config.defaultProject)}/${encodeURIComponent(config.defaultTeam)}/_apis/work/teamsettings/iterations`,
-                { params: { 'api-version': '7.1' } }
-            );
-
-            const iterations = response.data.value || [];
-            this.teamIterations = iterations.map((iter: any) => ({
-                name: iter.name,
-                path: iter.path,
-                timeFrame: iter.attributes?.timeFrame || 'unknown'
-            }));
-
-            // Find current iteration
-            const currentIter = this.teamIterations.find(i => i.timeFrame === 'current');
-            if (currentIter) {
-                this.currentIterationPath = currentIter.path;
-            }
-
-            log.debug('[BoardProvider] Loaded', this.teamIterations.length, 'team iterations');
-        } catch (error: any) {
-            log.error('Failed to load team iterations:', error?.message || error);
+            const iterations = await azureDevOps().getTeamIterations();
+            this.teamIterations = iterations.map(({ name, path, timeFrame }) => ({ name, path, timeFrame }));
+            this.currentIterationPath = iterations.find(i => i.timeFrame === 'current')?.path ?? null;
+        } catch (error) {
+            log.error('[BoardProvider] Failed to load team iterations:', error);
         }
     }
 
-    /**
-     * Load team members from Azure DevOps API
-     */
+    /** Loads the team's members (shared, cached). */
     private async loadTeamMembers(): Promise<void> {
         try {
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            const config = this.authenticationManager.getConfig();
-
-            if (!axiosInstance || !config?.defaultProject || !config?.defaultTeam) {
-                return;
-            }
-
-            const response = await axiosInstance.get(
-                `/_apis/projects/${encodeURIComponent(config.defaultProject)}/teams/${encodeURIComponent(config.defaultTeam)}/members`,
-                { params: { 'api-version': '7.1' } }
-            );
-
-            const members = response.data.value || [];
-            this.teamMembers = members.map((member: any) => ({
-                displayName: member.identity.displayName,
-                uniqueName: member.identity.uniqueName
-            }));
-
-            log.debug('[BoardProvider] Loaded', this.teamMembers.length, 'team members');
-        } catch (error: any) {
-            log.error('Failed to load team members:', error?.message || error);
+            this.teamMembers = await azureDevOps().getTeamMembers();
+        } catch (error) {
+            log.error('[BoardProvider] Failed to load team members:', error);
         }
     }
 

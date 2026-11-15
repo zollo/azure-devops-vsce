@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { log } from '../utils/logger';
 import { notifyBulkResult, notifySuccess } from '../utils/notify';
+import { sharedMetadataCache } from '../utils/metadataCache';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItemProvider } from '../views/workItemProvider';
 import { BacklogProvider } from '../views/backlogProvider';
@@ -437,6 +438,8 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
     // Refresh commands
     context.subscriptions.push(
         vscode.commands.registerCommand('azureDevOps.refresh', () => {
+            // A manual refresh also re-reads team iterations, areas, members and states
+            sharedMetadataCache.invalidate();
             components.workItemProvider.forceRefresh();
             components.backlogProvider.refresh();
             components.boardProvider.refresh();

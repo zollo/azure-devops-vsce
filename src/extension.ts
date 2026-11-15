@@ -17,6 +17,7 @@ import { detectOriginalExtensionConflict } from './utils/conflictDetection';
 import { startConnectionMonitor } from './authentication/connectionMonitorSetup';
 import { OnboardingPanel } from './onboarding/onboardingPanel';
 import { affectsConnectionSettings } from './utils/configChanges';
+import { initAzureDevOpsService } from './services/azureDevOpsService';
 
 export let authenticationManager: AuthenticationManager;
 export let workItemProvider: WorkItemProvider;
@@ -49,6 +50,7 @@ export async function activate(context: vscode.ExtensionContext) {
     authenticationManager = new AuthenticationManager(context);
     await authenticationManager.initialize();
     context.subscriptions.push(...authenticationManager.registerListeners());
+    const azureDevOpsService = initAzureDevOpsService(authenticationManager);
 
     statusBarManager = new StatusBarManager();
     gitIntegration = new GitIntegration();
@@ -142,6 +144,7 @@ export async function activate(context: vscode.ExtensionContext) {
             }
             if (affectsConnectionSettings(e, contributedSettingKeys)) {
                 await authenticationManager.refreshConfiguration();
+                azureDevOpsService.invalidate();
                 refreshAll();
             }
         })

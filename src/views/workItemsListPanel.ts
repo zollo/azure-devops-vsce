@@ -4,7 +4,8 @@ import { notifyBulkResult, notifySuccess } from '../utils/notify';
 import { mapWithConcurrency } from '../utils/workItemBatches';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem } from '../models/workItem';
-import { CacheManager } from '../utils/cacheManager';
+import { azureDevOps } from '../services/azureDevOpsService';
+import { LIST_FIELDS } from '../utils/workItemBatches';
 import { vendorAssetUri } from '../utils/webviewAssets';
 import { serializeForScript } from '../utils/webviewSecurity';
 import { WorkItemEventManager } from '../events/workItemEventManager';
@@ -26,7 +27,6 @@ const COLUMNS_SETTING = 'workItemsView.columns';
 
 export class WorkItemsListPanel {
     public static currentPanel: WorkItemsListPanel | undefined;
-    private static cacheManager: CacheManager = new CacheManager();
 
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
@@ -159,7 +159,7 @@ export class WorkItemsListPanel {
     }
 
     private static readonly EVENT_SOURCE = 'workItemsList';
-    private static readonly LIST_FIELDS = 'System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.AreaPath,System.IterationPath,System.Tags,Microsoft.VSTS.Common.Priority,System.ChangedDate,System.CreatedDate,System.CommentCount';
+    private static readonly LIST_FIELDS = [...LIST_FIELDS, 'System.CommentCount'];
 
     private _rowContext() {
         return {
@@ -206,15 +206,11 @@ export class WorkItemsListPanel {
             void this._panel.webview.postMessage({ command: 'removeRows', ids: shown });
             return;
         }
-        const axiosInstance = this.authenticationManager.getAxiosInstance();
-        if (!axiosInstance) {
+        if (!this.authenticationManager.getAxiosInstance()) {
             return;
         }
         try {
-            const response = await axiosInstance.get('/_apis/wit/workitems', {
-                params: { ids: shown.join(','), fields: WorkItemsListPanel.LIST_FIELDS, errorPolicy: 'omit' }
-            });
-            const fresh: WorkItem[] = (response.data.value || []).filter((item: any) => item);
+            const fresh = await azureDevOps().getWorkItems<WorkItem>(shown, { fields: WorkItemsListPanel.LIST_FIELDS });
             const freshIds = new Set(fresh.map(item => item.id));
             this.workItems = this.workItems
                 .filter(wi => !shown.includes(wi.id) || freshIds.has(wi.id))
@@ -307,46 +303,13 @@ export class WorkItemsListPanel {
     }
 
     private async _getAvailableStates(workItemType: string): Promise<string[]> {
+        const fallback = ['New', 'Active', 'Resolved', 'Closed'];
         try {
-            const config = this.authenticationManager.getConfig();
-            if (!config?.defaultProject) return [];
-
-            // Check cache first (60 minute TTL - states rarely change)
-            const cacheKey = `states:${config.defaultProject}:${workItemType}`;
-            const cached = WorkItemsListPanel.cacheManager.get<string[]>(cacheKey);
-            if (cached) {
-                return cached;
-            }
-
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            if (!axiosInstance) return [];
-
-            // Fetch work item type definition to get allowed states
-            const response = await axiosInstance.get(
-                `/${encodeURIComponent(config.defaultProject)}/_apis/wit/workitemtypes/${encodeURIComponent(workItemType)}`,
-                { params: { 'api-version': '7.0' } }
-            );
-
-            // Extract states from the workflow
-            const states: string[] = [];
-            if (response.data.states && Array.isArray(response.data.states)) {
-                response.data.states.forEach((stateObj: any) => {
-                    if (stateObj.name) {
-                        states.push(stateObj.name);
-                    }
-                });
-            }
-
-            const result = states.length > 0 ? states : ['New', 'Active', 'Resolved', 'Closed'];
-
-            // Cache for 60 minutes
-            WorkItemsListPanel.cacheManager.set(cacheKey, result, 60 * 60 * 1000);
-
-            return result;
+            const states = await azureDevOps().getWorkItemTypeStates(workItemType);
+            return states.length > 0 ? states : fallback;
         } catch (error) {
-            log.error('Failed to load available states:', error);
-            // Fallback to common states if API call fails
-            return ['New', 'Active', 'Resolved', 'Closed'];
+            log.error('[WorkItemsList] Failed to load available states:', error);
+            return fallback;
         }
     }
 
@@ -612,83 +575,9 @@ export class WorkItemsListPanel {
 
     private async _getTeamMembers(): Promise<Array<{displayName: string, uniqueName: string}>> {
         try {
-            const config = this.authenticationManager.getConfig();
-            if (!config?.defaultProject) {
-                return [];
-            }
-
-            // Check cache first (5 minute TTL)
-            const cacheKey = `team-members:${config.defaultProject}`;
-            const cached = WorkItemsListPanel.cacheManager.get<Array<{displayName: string, uniqueName: string}>>(cacheKey);
-            if (cached) {
-                return cached;
-            }
-
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            if (!axiosInstance) {
-                return [];
-            }
-
-            const memberSet = new Map<string, {displayName: string, uniqueName: string}>();
-
-            // Try to get team members if team is configured
-            if (config.defaultTeam) {
-                try {
-                    const teamResponse = await axiosInstance.get(
-                        `/_apis/projects/${encodeURIComponent(config.defaultProject)}/teams/${encodeURIComponent(config.defaultTeam)}/members`,
-                        { params: { 'api-version': '7.0' } }
-                    );
-
-                    const teamMembers = (teamResponse.data.value || []).map((member: any) => ({
-                        displayName: member.identity?.displayName || '',
-                        uniqueName: member.identity?.uniqueName || ''
-                    })).filter((m: {displayName: string, uniqueName: string}) => m.displayName && m.uniqueName);
-
-                    teamMembers.forEach((m: {displayName: string, uniqueName: string}) => memberSet.set(m.uniqueName, m));
-                } catch (teamError) {
-                    log.error('Failed to load team members:', teamError);
-                }
-            }
-
-            // Also get all project users as a fallback/supplement
-            try {
-                const projectName = config.defaultProject!; // Already checked above
-                const identitiesResponse = await axiosInstance.get(
-                    `/_apis/projects/${encodeURIComponent(projectName)}/teams`,
-                    { params: { 'api-version': '7.0' } }
-                );
-
-                // Get members from all teams in parallel
-                const teams = (identitiesResponse.data.value || []).slice(0, 5);
-                const teamMemberPromises = teams.map((team: any) =>
-                    axiosInstance.get(
-                        `/_apis/projects/${encodeURIComponent(projectName)}/teams/${encodeURIComponent(team.id)}/members`,
-                        { params: { 'api-version': '7.0' } }
-                    ).catch(() => ({ data: { value: [] } }))
-                );
-
-                const teamMemberResponses = await Promise.all(teamMemberPromises);
-
-                teamMemberResponses.forEach(response => {
-                    const additionalMembers = (response.data.value || []).map((member: any) => ({
-                        displayName: member.identity?.displayName || '',
-                        uniqueName: member.identity?.uniqueName || ''
-                    })).filter((m: {displayName: string, uniqueName: string}) => m.displayName && m.uniqueName);
-
-                    additionalMembers.forEach((m: {displayName: string, uniqueName: string}) => memberSet.set(m.uniqueName, m));
-                });
-            } catch (projectError) {
-                log.error('Failed to load project users:', projectError);
-            }
-
-            const members = Array.from(memberSet.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
-
-            // Cache for 5 minutes
-            WorkItemsListPanel.cacheManager.set(cacheKey, members, 5 * 60 * 1000);
-
-            return members;
+            return await azureDevOps().getProjectMembers();
         } catch (error) {
-            log.error('Failed to get team members:', error);
+            log.error('[WorkItemsList] Failed to load team members:', error);
             return [];
         }
     }
@@ -713,56 +602,8 @@ export class WorkItemsListPanel {
             // Build WIQL query
             const wiql = `SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType], [System.AssignedTo], [System.AreaPath], [System.IterationPath], [System.Tags], [Microsoft.VSTS.Common.Priority], [System.ChangedDate], [System.CreatedDate] FROM WorkItems WHERE [System.TeamProject] = @project ORDER BY [System.ChangedDate] DESC`;
 
-            const response = await axiosInstance.post(
-                `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql`,
-                { query: wiql },
-                { params: { '$top': maxItems } }
-            );
-
-            const workItemRefs = response.data.workItems || [];
-            if (workItemRefs.length === 0) {
-                this.workItems = [];
-                return;
-            }
-
-            // Get detailed work item information
-            const workItemIdsToLoad = workItemRefs.slice(0, maxItems).map((item: any) => item.id);
-
-            // Load in batches of 200 (Azure DevOps API limit) with limited concurrency
-            const BATCH_SIZE = 200;
-            const MAX_CONCURRENT_BATCHES = 3;
-            const batches: number[][] = [];
-
-            for (let i = 0; i < workItemIdsToLoad.length; i += BATCH_SIZE) {
-                batches.push(workItemIdsToLoad.slice(i, i + BATCH_SIZE));
-            }
-
-            const allWorkItems: any[] = [];
-
-            // Process batches in groups of MAX_CONCURRENT_BATCHES
-            for (let i = 0; i < batches.length; i += MAX_CONCURRENT_BATCHES) {
-                const batchGroup = batches.slice(i, i + MAX_CONCURRENT_BATCHES);
-
-                const batchPromises = batchGroup.map(async (batch) => {
-                    try {
-                        const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
-                            params: {
-                                'ids': batch.join(','),
-                                'fields': WorkItemsListPanel.LIST_FIELDS
-                            }
-                        });
-                        return detailsResponse.data.value || [];
-                    } catch (error: any) {
-                        log.error(`Failed to load work items batch:`, error?.message || error);
-                        return [];
-                    }
-                });
-
-                const batchResults = await Promise.all(batchPromises);
-                allWorkItems.push(...batchResults.flat());
-            }
-
-            this.workItems = allWorkItems;
+            const ids = await azureDevOps().queryWorkItemIds(wiql, maxItems);
+            this.workItems = await azureDevOps().getWorkItems<WorkItem>(ids, { fields: WorkItemsListPanel.LIST_FIELDS });
         } catch (error: any) {
             log.error('Failed to load work items:', error?.message || error);
             this.workItems = [];

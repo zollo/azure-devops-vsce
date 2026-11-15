@@ -8,6 +8,7 @@ import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItemEventManager } from '../events/workItemEventManager';
 import { OrganizationManager } from '../authentication/organizationManager';
 import { outputChannel } from '../extension';
+import { azureDevOps } from '../services/azureDevOpsService';
 
 interface BoardColumn {
     id: string;
@@ -1134,267 +1135,85 @@ export class BoardPanel {
             return [];
         }
 
-        const config = this.authenticationManager.getConfig();
-        if (!config) {
-            throw new Error('Configuration not available');
-        }
-
         const startTime = Date.now();
-        outputChannel.appendLine(`[Board] Fetching details for ${workItemRefs.length} work items in batches of 200`);
-
-        // Azure DevOps API supports up to 200 work items per request
-        const BATCH_SIZE = 200;
-        const batches: any[][] = [];
-
-        // Split work item IDs into batches
-        for (let i = 0; i < workItemRefs.length; i += BATCH_SIZE) {
-            batches.push(workItemRefs.slice(i, i + BATCH_SIZE));
-        }
-
-        // Load batches in parallel but limit concurrency to avoid overwhelming the system
-        // This prevents "EAFNOSUPPORT" errors from too many simultaneous connections
-        const MAX_CONCURRENT_BATCHES = 3;
-        outputChannel.appendLine(`[Board] Loading batches with max ${MAX_CONCURRENT_BATCHES} concurrent requests...`);
-
-        const allWorkItems: BoardWorkItem[] = [];
-
-        // Process batches in groups of MAX_CONCURRENT_BATCHES
-        for (let i = 0; i < batches.length; i += MAX_CONCURRENT_BATCHES) {
-            const batchGroup = batches.slice(i, i + MAX_CONCURRENT_BATCHES);
-
-            const batchPromises = batchGroup.map(async (batch, groupIndex) => {
-                const actualIndex = i + groupIndex;
-                const workItemIds = batch.map((item: any) => item.id).join(',');
-
-                try {
-                    const detailsResponse = await axiosInstance.get(`/${encodeURIComponent(config.defaultProject || '')}/_apis/wit/workitems`, {
-                        params: {
-                            'ids': workItemIds,
-                            '$expand': 'relations',
-                            'api-version': '7.1'
-                        }
-                    });
-
-                    outputChannel.appendLine(`[Board] ✓ Batch ${actualIndex + 1}/${batches.length} completed (${batch.length} items)`);
-
-                    return (detailsResponse.data.value || []).map((item: any) => {
-                        const workItem: any = {
-                            id: item.id,
-                            title: item.fields['System.Title'],
-                            state: item.fields['System.State'],
-                            type: item.fields['System.WorkItemType'],
-                            assignedTo: item.fields['System.AssignedTo'],
-                            priority: item.fields['Microsoft.VSTS.Common.Priority'],
-                            tags: item.fields['System.Tags'],
-                            areaPath: item.fields['System.AreaPath'],
-                            iterationPath: item.fields['System.IterationPath'],
-                            boardColumn: item.fields['System.BoardColumn'] || column.name,
-                            effort: item.fields['Microsoft.VSTS.Scheduling.Effort'] || (item.fields as any)['Microsoft.VSTS.Scheduling.StoryPoints']
-                        };
-                        // Store relations temporarily for child work items loading
-                        if (item.relations && item.relations.length > 0) {
-                            workItem._tempRelations = item.relations;
-                            outputChannel.appendLine(`[Board] Stored ${item.relations.length} relations for work item #${item.id}`);
-                        }
-                        return workItem;
-                    });
-                } catch (error: any) {
-                    outputChannel.appendLine(`[Board] ✗ Batch ${actualIndex + 1}/${batches.length} failed: ${error?.message || error}`);
-                    // Return empty array for failed batch
-                    return [];
-                }
-            });
-
-            // Wait for this group of batches to complete
-            const batchResults = await Promise.all(batchPromises);
-            allWorkItems.push(...batchResults.flat());
-        }
-
-        const elapsed = Date.now() - startTime;
-        outputChannel.appendLine(`[Board] ✓ Fetched ${allWorkItems.length} work items total in ${elapsed}ms (${batches.length} batches, max ${MAX_CONCURRENT_BATCHES} concurrent)`);
-        return allWorkItems;
+        const ids = workItemRefs.map((ref: any) => Number(ref.id)).filter((id: number) => Number.isFinite(id));
+        const items = await azureDevOps().getWorkItems(ids, { expand: 'relations' });
+        const workItems = items.map((item: any) => {
+            const fields = item.fields || {};
+            const workItem: any = {
+                id: item.id,
+                title: fields['System.Title'],
+                state: fields['System.State'],
+                type: fields['System.WorkItemType'],
+                assignedTo: fields['System.AssignedTo'],
+                priority: fields['Microsoft.VSTS.Common.Priority'],
+                tags: fields['System.Tags'],
+                areaPath: fields['System.AreaPath'],
+                iterationPath: fields['System.IterationPath'],
+                boardColumn: fields['System.BoardColumn'] || column.name,
+                effort: fields['Microsoft.VSTS.Scheduling.Effort'] || fields['Microsoft.VSTS.Scheduling.StoryPoints']
+            };
+            // Kept for loading child work items, then removed
+            if (item.relations && item.relations.length > 0) {
+                workItem._tempRelations = item.relations;
+            }
+            return workItem as BoardWorkItem;
+        });
+        log.debug(`[Board] Loaded ${workItems.length} of ${ids.length} work items in ${Date.now() - startTime}ms`);
+        return workItems;
     }
 
-    private async _loadChildWorkItems(workItemsMap: Map<string, BoardWorkItem[]>, axiosInstance: any): Promise<void> {
+    private async _loadChildWorkItems(workItemsMap: Map<string, BoardWorkItem[]>, _axiosInstance?: unknown): Promise<void> {
+        const allWorkItems = [...workItemsMap.values()].flat();
         try {
-            const config = this.authenticationManager.getConfig();
-            if (!config) {
-                outputChannel.appendLine('[Board] Configuration not available, skipping child work items');
+            // Child ids from each card's parent-to-child links
+            const parentToChildIds = new Map<number, number[]>();
+            for (const workItem of allWorkItems) {
+                const relations: any[] = (workItem as any)._tempRelations || [];
+                const childIds = relations
+                    .filter(rel => rel?.rel === 'System.LinkTypes.Hierarchy-Forward' && rel.url)
+                    .map(rel => Number(extractWorkItemIdFromUrl(rel.url)))
+                    .filter(id => Number.isFinite(id) && id > 0);
+                if (childIds.length > 0) {
+                    parentToChildIds.set(workItem.id, childIds);
+                }
+            }
+            const allChildIds = [...new Set([...parentToChildIds.values()].flat())];
+            if (allChildIds.length === 0) {
                 return;
             }
 
-            // Collect all child work item IDs from all parent work items
-            const allChildIds = new Set<string>();
-            const parentToChildMap = new Map<number, string[]>(); // Maps parent ID to array of child IDs
-
-            // Iterate through all work items to find children
-            let totalWorkItems = 0;
-            let workItemsWithRelations = 0;
-            let workItemsWithChildren = 0;
-
-            for (const [, workItems] of workItemsMap.entries()) {
-                for (const workItem of workItems) {
-                    totalWorkItems++;
-                    const relations = (workItem as any)._tempRelations || [];
-
-                    if (relations.length > 0) {
-                        workItemsWithRelations++;
-                        outputChannel.appendLine(`[Board] Work item #${workItem.id} has ${relations.length} relations`);
-                    }
-
-                    // Log all relation types for debugging
-                    if (relations.length > 0) {
-                        const relTypes = relations.map((r: any) => r.rel).join(', ');
-                        outputChannel.appendLine(`[Board] Work item #${workItem.id} relation types: ${relTypes}`);
-                    }
-
-                    const childRelations = relations.filter((rel: any) =>
-                        rel.rel === 'System.LinkTypes.Hierarchy-Forward' && rel.url
-                    );
-
-                    if (childRelations.length > 0) {
-                        workItemsWithChildren++;
-                        const childIds: string[] = [];
-                        for (const rel of childRelations) {
-                            outputChannel.appendLine(`[Board] Processing child relation URL: ${rel.url}`);
-
-                            // More robust URL parsing - handles both dev.azure.com and visualstudio.com
-                            // URLs can be: https://dev.azure.com/org/_apis/wit/workitems/123
-                            //          or: https://org.visualstudio.com/_apis/wit/workitems/123
-                            const childId = extractWorkItemIdFromUrl(rel.url);
-                            if (childId) {
-                                allChildIds.add(childId);
-                                childIds.push(childId);
-                                outputChannel.appendLine(`[Board] ✓ Extracted child ID: ${childId}`);
-                            } else {
-                                outputChannel.appendLine(`[Board] ✗ Failed to extract ID from URL: ${rel.url}`);
-                            }
-                        }
-                        if (childIds.length > 0) {
-                            parentToChildMap.set(workItem.id, childIds);
-                            outputChannel.appendLine(`[Board] Work item #${workItem.id} has ${childIds.length} children: ${childIds.join(', ')}`);
-                        }
-                    }
+            // Without a configured project this falls back to the organization-wide endpoint
+            const children = await azureDevOps().getWorkItems(allChildIds, {
+                fields: ['System.Id', 'System.Title', 'System.State', 'System.WorkItemType', 'System.AssignedTo']
+            });
+            const childById = new Map<number, any>();
+            for (const child of children) {
+                const fields = (child as any).fields || {};
+                const assignedTo = fields['System.AssignedTo'];
+                childById.set(child.id, {
+                    id: child.id,
+                    title: fields['System.Title'],
+                    state: fields['System.State'],
+                    type: fields['System.WorkItemType'],
+                    assignedTo: assignedTo ? {
+                        displayName: assignedTo.displayName || assignedTo,
+                        uniqueName: assignedTo.uniqueName || ''
+                    } : null
+                });
+            }
+            for (const workItem of allWorkItems) {
+                const childIds = parentToChildIds.get(workItem.id);
+                if (childIds) {
+                    workItem.children = childIds.map(id => childById.get(id)).filter(child => child !== undefined);
                 }
             }
-
-            outputChannel.appendLine(`[Board] Child loading summary: ${totalWorkItems} total items, ${workItemsWithRelations} with relations, ${workItemsWithChildren} with children`);
-
-            // If we have child IDs, fetch them all in one batch
-            if (allChildIds.size > 0) {
-                outputChannel.appendLine(`[Board] Loading ${allChildIds.size} child work items...`);
-
-                // Get project name from config
-                let projectName = config.defaultProject || '';
-                outputChannel.appendLine(`[Board] config.defaultProject: "${projectName}"`);
-                outputChannel.appendLine(`[Board] Full config: ${JSON.stringify(config)}`);
-
-                // If project name is empty, try to extract from a child work item URL
-                // Child URLs can have project GUID like: https://crate.visualstudio.com/GUID/_apis/wit/workItems/123
-                if (!projectName && allChildIds.size > 0) {
-                    const firstChildRelation = Array.from(workItemsMap.values())
-                        .flatMap(items => items)
-                        .find(item => (item as any)._tempRelations?.some((r: any) => r.rel === 'System.LinkTypes.Hierarchy-Forward'));
-
-                    if (firstChildRelation) {
-                        const rel = (firstChildRelation as any)._tempRelations.find((r: any) => r.rel === 'System.LinkTypes.Hierarchy-Forward');
-                        if (rel && rel.url) {
-                            // Extract project GUID or name from URL
-                            // Format: https://crate.visualstudio.com/0eab1257.../Experian%20Verifications/_apis/wit/workItems/123
-                            // or: https://dev.azure.com/org/Project/_apis/wit/workItems/123
-                            const urlMatch = rel.url.match(/\.com\/([^/]+)\/([^/]+)\/_apis/);
-                            if (urlMatch && urlMatch[2]) {
-                                projectName = urlMatch[2];
-                                outputChannel.appendLine(`[Board] Extracted project identifier from child URL: "${projectName}"`);
-                            } else {
-                                // Fallback: single segment before /_apis
-                                const simpleMatch = rel.url.match(/\.com\/([^/]+)\/_apis/);
-                                if (simpleMatch && simpleMatch[1]) {
-                                    projectName = simpleMatch[1];
-                                    outputChannel.appendLine(`[Board] Extracted project identifier (simple): "${projectName}"`);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (!projectName) {
-                    throw new Error('Project name is not available. Cannot load child work items.');
-                }
-
-                // Batch child IDs in groups of 200 (API limit)
-                const childIdArray = Array.from(allChildIds);
-                const batchSize = 200;
-                const allChildItems: any[] = [];
-
-                for (let i = 0; i < childIdArray.length; i += batchSize) {
-                    const batchIds = childIdArray.slice(i, i + batchSize).join(',');
-                    const batchNum = Math.floor(i / batchSize) + 1;
-                    const totalBatches = Math.ceil(childIdArray.length / batchSize);
-                    outputChannel.appendLine(`[Board] Loading child batch ${batchNum}/${totalBatches}...`);
-
-                    const batchResponse = await axiosInstance.get(`/${encodeURIComponent(projectName)}/_apis/wit/workitems`, {
-                        params: {
-                            'ids': batchIds,
-                            'fields': 'System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo',
-                            '$errorPolicy': 'Omit',
-                            'api-version': '7.1'
-                        }
-                    });
-
-                    if (batchResponse.data.value) {
-                        allChildItems.push(...batchResponse.data.value);
-                    }
-                }
-
-                outputChannel.appendLine(`[Board] ✓ Loaded ${allChildItems.length} child work items`);
-
-                // Create a map of child ID to child data for quick lookup
-                const childDataMap = new Map<number, any>();
-                for (const child of allChildItems) {
-                    const assignedToField = child.fields['System.AssignedTo'];
-                    childDataMap.set(child.id, {
-                        id: child.id,
-                        title: child.fields['System.Title'],
-                        state: child.fields['System.State'],
-                        type: child.fields['System.WorkItemType'],
-                        assignedTo: assignedToField ? {
-                            displayName: assignedToField.displayName || assignedToField,
-                            uniqueName: assignedToField.uniqueName || ''
-                        } : null
-                    });
-                }
-
-                // Now assign children back to their parent work items
-                for (const [, workItems] of workItemsMap.entries()) {
-                    for (const workItem of workItems) {
-                        const childIds = parentToChildMap.get(workItem.id);
-                        if (childIds) {
-                            workItem.children = childIds
-                                .map(id => childDataMap.get(parseInt(id)))
-                                .filter(child => child !== undefined);
-                        }
-                        // Clean up the temporary relations property
-                        delete (workItem as any)._tempRelations;
-                    }
-                }
-            } else {
-                outputChannel.appendLine(`[Board] No child work items found, skipping child loading`);
-                // Clean up relations from all work items even if no children
-                for (const [, workItems] of workItemsMap.entries()) {
-                    for (const workItem of workItems) {
-                        delete (workItem as any)._tempRelations;
-                    }
-                }
-            }
-        } catch (error: any) {
-            outputChannel.appendLine(`[Board] Failed to load child work items: ${error?.message || error}`);
-            log.error('Failed to load child work items:', error);
-            // Clean up relations even on error
-            for (const [, workItems] of workItemsMap.entries()) {
-                for (const workItem of workItems) {
-                    delete (workItem as any)._tempRelations;
-                }
+            log.debug(`[Board] Loaded ${children.length} child work items for ${parentToChildIds.size} cards`);
+        } catch (error) {
+            log.error('[Board] Failed to load child work items:', error);
+        } finally {
+            for (const workItem of allWorkItems) {
+                delete (workItem as any)._tempRelations;
             }
         }
     }
@@ -1997,164 +1816,37 @@ export class BoardPanel {
 
     private async _getTeamMembers(): Promise<Array<{displayName: string, uniqueName: string}>> {
         try {
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            const config = this.authenticationManager.getConfig();
-
-            if (!axiosInstance || !config?.defaultProject) {
-                log.debug('Cannot get team members: missing config');
-                return [];
-            }
-
-            const members: Array<{displayName: string, uniqueName: string}> = [];
-
-            // Try to get team members if team is configured
-            if (config.defaultTeam) {
-                try {
-                    const teamResponse = await axiosInstance.get(
-                        `/_apis/projects/${encodeURIComponent(config.defaultProject)}/teams/${encodeURIComponent(config.defaultTeam)}/members`,
-                        { params: { 'api-version': '7.0' } }
-                    );
-
-                    const teamMembers = (teamResponse.data.value || []).map((member: any) => ({
-                        displayName: member.identity?.displayName || '',
-                        uniqueName: member.identity?.uniqueName || ''
-                    })).filter((m: any) => m.displayName && m.uniqueName);
-
-                    members.push(...teamMembers);
-                    outputChannel.appendLine(`[Board] Loaded ${teamMembers.length} team members from team "${config.defaultTeam}"`);
-                } catch (teamError) {
-                    outputChannel.appendLine(`[Board] Failed to load team members: ${teamError}`);
-                    log.error('Failed to load team members:', teamError);
-                }
-            } else {
-                outputChannel.appendLine('[Board] No team configured, cannot load team members');
-            }
-
-            outputChannel.appendLine(`[Board] Total team members: ${members.length}`);
-            return members.sort((a, b) => a.displayName.localeCompare(b.displayName));
+            return await azureDevOps().getTeamMembers();
         } catch (error) {
-            log.error('Failed to get team members:', error);
+            log.error('[Board] Failed to load team members:', error);
             return [];
         }
     }
 
-    /**
-     * Get ALL team iterations (past, current, and future) from Azure DevOps API
-     * According to official docs: https://learn.microsoft.com/en-us/rest/api/azure/devops/work/iterations/list
-     */
+    /** All of the team's iterations (past, current and future). */
     private async _getAllTeamIterations(): Promise<Array<{name: string, path: string, timeFrame: string}>> {
         try {
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            const config = this.authenticationManager.getConfig();
-
-            if (!axiosInstance || !config?.defaultProject || !config?.defaultTeam) {
-                outputChannel.appendLine('[Board] Cannot get team iterations: missing config');
-                return [];
-            }
-
-            // Call WITHOUT $timeframe parameter to get ALL iterations (past, current, future)
-            const response = await axiosInstance.get(
-                `/${encodeURIComponent(config.defaultProject)}/${encodeURIComponent(config.defaultTeam)}/_apis/work/teamsettings/iterations`,
-                { params: { 'api-version': '7.1' } }
-            );
-
-            const iterations = response.data.value || [];
-            outputChannel.appendLine(`[Board] Loaded ${iterations.length} team iterations from API`);
-
-            // Map to simpler structure with timeFrame info
-            const mapped = iterations.map((iter: any) => ({
-                name: iter.name,
-                path: iter.path,
-                timeFrame: iter.attributes?.timeFrame || 'unknown'
-            }));
-
-            // Log iteration details for debugging
-            const futureCount = mapped.filter((i: any) => i.timeFrame === 'future').length;
-            const currentCount = mapped.filter((i: any) => i.timeFrame === 'current').length;
-            const pastCount = mapped.filter((i: any) => i.timeFrame === 'past').length;
-            outputChannel.appendLine(`[Board] Iterations: ${futureCount} future, ${currentCount} current, ${pastCount} past`);
-
-            return mapped;
+            return await azureDevOps().getTeamIterations();
         } catch (error) {
-            log.error('Failed to get team iterations:', error);
-            outputChannel.appendLine(`[Board] Failed to get team iterations: ${error}`);
+            log.error('[Board] Failed to load team iterations:', error);
             return [];
         }
     }
 
     private async _getCurrentIteration(): Promise<string | null> {
         try {
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            const config = this.authenticationManager.getConfig();
-
-            if (!axiosInstance || !config?.defaultProject || !config?.defaultTeam) {
-                log.debug('Cannot get current iteration: missing config');
-                return null;
-            }
-
-            const response = await axiosInstance.get(
-                `/${encodeURIComponent(config.defaultProject)}/${encodeURIComponent(config.defaultTeam)}/_apis/work/teamsettings/iterations`,
-                { params: { '$timeframe': 'current', 'api-version': '7.1' } }
-            );
-
-            const iterations = response.data.value || [];
-            if (iterations.length > 0) {
-                const currentIteration = iterations[0];
-                log.debug('Current iteration:', currentIteration.name, currentIteration.path);
-                return currentIteration.path;
-            }
-
-            log.debug('No current iteration found');
-            return null;
+            return await azureDevOps().getCurrentIterationPath();
         } catch (error) {
-            log.error('Failed to get current iteration:', error);
+            log.error('[Board] Failed to load the current iteration:', error);
             return null;
         }
     }
 
     private async _getTeamAreaPath(): Promise<string | null> {
         try {
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            const config = this.authenticationManager.getConfig();
-
-            if (!axiosInstance || !config?.defaultProject || !config?.defaultTeam) {
-                return null;
-            }
-
-            // The team settings response has a link to teamFieldValues - need to call it separately
-            const teamFieldValuesResponse = await axiosInstance.get(
-                `/${encodeURIComponent(config.defaultProject)}/${encodeURIComponent(config.defaultTeam)}/_apis/work/teamsettings/teamfieldvalues`,
-                { params: { 'api-version': '7.1' } }
-            );
-
-            // DEBUG: Log the team field values response
-            outputChannel.appendLine(`[Board] Team field values response: ${JSON.stringify(teamFieldValuesResponse.data, null, 2)}`);
-
-            // The response should have a field (usually Area Path) with values
-            if (teamFieldValuesResponse.data.field && teamFieldValuesResponse.data.field.referenceName === 'System.AreaPath') {
-                const values = teamFieldValuesResponse.data.values || [];
-                if (values.length > 0 && values[0].value) {
-                    const areaPath = values[0].value;
-                    outputChannel.appendLine(`[Board] Team area path: ${areaPath}`);
-                    return areaPath;
-                }
-            }
-
-            // Fallback: try defaultValue
-            if (teamFieldValuesResponse.data.defaultValue) {
-                const areaPath = teamFieldValuesResponse.data.defaultValue;
-                outputChannel.appendLine(`[Board] Team area path (from defaultValue): ${areaPath}`);
-                return areaPath;
-            }
-
-            outputChannel.appendLine('[Board] No team area path found in teamFieldValues response');
-            return null;
-        } catch (error: any) {
-            log.error('Failed to get team area path:', error);
-            outputChannel.appendLine(`[Board] Failed to get team area path: ${error?.message || error}`);
-            if (error?.response?.data) {
-                outputChannel.appendLine(`[Board] Error details: ${JSON.stringify(error.response.data, null, 2)}`);
-            }
+            return await azureDevOps().getTeamAreaPath();
+        } catch (error) {
+            log.error('[Board] Failed to load the team area path:', error);
             return null;
         }
     }

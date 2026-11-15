@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { log } from '../utils/logger';
 import { AuthenticationManager } from '../authentication/authenticationManager';
-import { fetchWorkItemsInBatches, LIST_FIELDS } from '../utils/workItemBatches';
+import { LIST_FIELDS } from '../utils/workItemBatches';
+import { azureDevOps } from '../services/azureDevOpsService';
 import { applyLoadError, describeLoadError } from './loadErrors';
 
 export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
@@ -44,11 +45,7 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
                 return;
             }
 
-            const response = await axiosInstance.get(
-                `/${encodeURIComponent(config.defaultProject)}/${encodeURIComponent(config.defaultTeam)}/_apis/work/teamsettings/iterations`
-            );
-
-            this.sprints = response.data.value || [];
+            this.sprints = (await azureDevOps().getTeamIterations()).map(iteration => iteration.raw);
 
             // Sort sprints by start date (most recent first), with current sprint at top
             const now = new Date();
@@ -99,31 +96,10 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
                 return [];
             }
 
-            let batchError: unknown;
-            // The API takes at most 200 ids per request, so large sprints load in batches.
             const workItemIds: number[] = workItemRefs
                 .map((item: any) => item.target?.id)
                 .filter((id: unknown): id is number => typeof id === 'number');
-            const workItems = await fetchWorkItemsInBatches<any>(
-                workItemIds,
-                async batch => {
-                    const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
-                        params: {
-                            'ids': batch.join(','),
-                            'fields': LIST_FIELDS.join(','),
-                            'errorPolicy': 'omit'
-                        }
-                    });
-                    return (detailsResponse.data.value || []).filter((item: any) => item);
-                },
-                error => {
-                    log.error('Failed to load a batch of sprint work items:', (error as any)?.message || error);
-                    batchError = batchError ?? error;
-                }
-            );
-            if (workItems.length === 0 && batchError) {
-                throw batchError;
-            }
+            const workItems = await azureDevOps().getWorkItems(workItemIds, { fields: LIST_FIELDS });
             this.sprintWorkItems.set(sprintId, workItems);
             return workItems;
         } catch (error: any) {
