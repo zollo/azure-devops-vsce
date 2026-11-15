@@ -14,6 +14,9 @@
 //
 // Elements added later (menus, re-rendered cards) are connected as they appear.
 //
+// An element that is not a native control but has role="button", "menuitem", "option" or "tab"
+// and a data-click also runs on Enter and Space, so keyboard users can reach it.
+//
 // Only functions named in the page as the extension rendered it can be called, plus any a
 // script adds with allowWebviewHandlers(names). Markup that arrives later, such as pasted
 // rich text, can't name some other global function and have it run.
@@ -74,8 +77,28 @@
         }
     }
 
+    var KEY_ROLES = ['button', 'menuitem', 'option', 'tab'];
+    var NATIVE = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY'];
+
+    function bindKeyboardActivation(el, done) {
+        if (done.keyActivate || !el.hasAttribute('data-click') || NATIVE.indexOf(el.tagName) !== -1
+            || KEY_ROLES.indexOf(el.getAttribute('role')) === -1) {
+            return;
+        }
+        done.keyActivate = true;
+        el.addEventListener('keydown', function (event) {
+            if (event.target !== el || (event.key !== 'Enter' && event.key !== ' ')) {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            el.click();
+        });
+    }
+
     function bindElement(el) {
         var done = bound.get(el) || {};
+        bindKeyboardActivation(el, done);
         EVENTS.forEach(function (name) {
             var fnName = el.getAttribute('data-' + name);
             if (!fnName || done[name]) {

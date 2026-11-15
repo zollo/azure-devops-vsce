@@ -4,6 +4,7 @@ import { AuthenticationManager } from '../authentication/authenticationManager';
 import { LIST_FIELDS, MAX_IDS_PER_REQUEST } from '../utils/workItemBatches';
 import { applyLoadError, describeLoadError } from './loadErrors';
 import { WorkItem } from '../models/workItem';
+import { decorateWorkItemRow } from './workItemTreeItems';
 
 export interface Query {
     id: string;
@@ -122,24 +123,8 @@ export class QueryProvider implements vscode.TreeDataProvider<QueryTreeItem> {
             }
 
             return results.map(item => {
-                const title = item.fields['System.Title'];
-                const state = item.fields['System.State'];
-                const type = item.fields['System.WorkItemType'];
-
-                const treeItem = new QueryTreeItem(
-                    `#${item.id}: ${title}`,
-                    vscode.TreeItemCollapsibleState.None,
-                    {
-                        command: 'azureDevOps.openWorkItem',
-                        title: 'Open Work Item',
-                        arguments: [item.id]
-                    }
-                );
-
-                treeItem.description = `${type} • ${state}`;
-                treeItem.contextValue = 'workItem';
+                const treeItem = decorateWorkItemRow(new QueryTreeItem('', vscode.TreeItemCollapsibleState.None), item);
                 treeItem.workItemId = item.id;
-
                 return treeItem;
             });
         }

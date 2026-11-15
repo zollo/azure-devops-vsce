@@ -13,7 +13,9 @@ export const mock = {
     settings: {} as Record<string, unknown>,
     /** What vscode.authentication.getSession returns. */
     authSession: undefined as { id: string; accessToken: string; account: { id: string; label: string }; scopes: string[] } | undefined,
-    getSessionCalls: [] as unknown[][]
+    getSessionCalls: [] as unknown[][],
+    /** Webview panel serializers registered with vscode.window.registerWebviewPanelSerializer. */
+    serializers: new Map<string, { deserializeWebviewPanel(panel: unknown, state: unknown): Promise<void> }>()
 };
 
 class EventEmitter<T> {
@@ -43,6 +45,10 @@ const vscodeStub = {
             return Promise.resolve(undefined);
         },
         showInformationMessage: () => Promise.resolve(undefined),
+        registerWebviewPanelSerializer: (viewType: string, serializer: { deserializeWebviewPanel(panel: unknown, state: unknown): Promise<void> }) => {
+            mock.serializers.set(viewType, serializer);
+            return { dispose: () => mock.serializers.delete(viewType) };
+        },
         showWarningMessage: (message: string) => {
             mock.warningMessages.push(message);
             return Promise.resolve(undefined);
@@ -76,6 +82,18 @@ const vscodeStub = {
     },
     Uri: {
         joinPath: (base: { path: string }, ...segments: string[]) => ({ path: [base.path, ...segments].join('/') })
+    },
+    TreeItem: class {
+        [key: string]: unknown;
+        constructor(public label: unknown, public collapsibleState?: number) {}
+    },
+    TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
+    ThemeIcon: class { constructor(public id: string, public color?: unknown) {} },
+    ThemeColor: class { constructor(public id: string) {} },
+    MarkdownString: class {
+        value = '';
+        appendMarkdown(text: string) { this.value += text; return this; }
+        appendText(text: string) { this.value += text.replace(/[\\`*_{}[\]()#+\-.!<>|]/g, '\\$&'); return this; }
     }
 };
 
@@ -95,4 +113,5 @@ export function resetMock(): void {
     mock.settings = {};
     mock.authSession = undefined;
     mock.getSessionCalls.length = 0;
+    mock.serializers.clear();
 }

@@ -18,6 +18,10 @@ import { startConnectionMonitor } from './authentication/connectionMonitorSetup'
 import { OnboardingPanel } from './onboarding/onboardingPanel';
 import { affectsConnectionSettings } from './utils/configChanges';
 import { initAzureDevOpsService } from './services/azureDevOpsService';
+import { registerPanelSerializers } from './views/panelSerializers';
+import { BoardPanel } from './views/boardPanel';
+import { WorkItemsListPanel } from './views/workItemsListPanel';
+import { WorkItemPanel } from './views/workItemPanel';
 
 export let authenticationManager: AuthenticationManager;
 export let workItemProvider: WorkItemProvider;
@@ -34,6 +38,7 @@ export let searchService: SearchService;
 export let activeWorkItemService: ActiveWorkItemService;
 
 export async function activate(context: vscode.ExtensionContext) {
+    const activationStart = Date.now();
     // The original extension registers the same command IDs; running both breaks activation.
     if (detectOriginalExtensionConflict(context)) {
         return;
@@ -184,41 +189,70 @@ export async function activate(context: vscode.ExtensionContext) {
     statusBarManager.updateStatus('disconnected');
     connectionStatusProvider.refresh();
 
-    // Try to auto-connect if credentials are available
-    try {
-        const isConnected = await authenticationManager.autoConnect();
-        if (isConnected) {
-            vscode.commands.executeCommand('setContext', 'azureDevOps.connected', true);
-            statusBarManager.updateStatus('connected');
-            const showNotifications = config.get<boolean>('showNotifications', true);
-            if (showNotifications) {
-                vscode.window.showInformationMessage('✓ Connected to Azure DevOps');
+    // Connecting waits on the network, so it runs after activation returns: commands and views
+    // are ready at once, and they fill in when the connection is up.
+    // The check and re-authenticate commands are registered now so they work while connecting;
+    // the monitor's own checks start once auto-connect is done, so the two don't race.
+    const connectionMonitor = startConnectionMonitor(context, authenticationManager, statusBarManager, refreshAll, health => connectionStatusProvider.setHealth(health), false);
+
+    const activatedAt = Date.now();
+    const finishStartup = async () => {
+        // Try to auto-connect if credentials are available
+        try {
+            const isConnected = await authenticationManager.autoConnect();
+            if (isConnected) {
+                vscode.commands.executeCommand('setContext', 'azureDevOps.connected', true);
+                statusBarManager.updateStatus('connected');
+                const showNotifications = config.get<boolean>('showNotifications', true);
+                if (showNotifications) {
+                    vscode.window.showInformationMessage('✓ Connected to Azure DevOps');
+                }
+                refreshAll();
+                // Bring back the work item the person had started; it needs the connection
+                void activeWorkItemService.restore();
+            } else {
+                vscode.commands.executeCommand('setContext', 'azureDevOps.connected', false);
+                statusBarManager.updateStatus('disconnected');
             }
-            refreshAll();
-        } else {
+        } catch (error) {
+            log.debug('Auto-connect failed:', error);
             vscode.commands.executeCommand('setContext', 'azureDevOps.connected', false);
             statusBarManager.updateStatus('disconnected');
         }
-    } catch (error) {
-        log.debug('Auto-connect failed:', error);
-        vscode.commands.executeCommand('setContext', 'azureDevOps.connected', false);
-        statusBarManager.updateStatus('disconnected');
-    }
 
-    // Watch the connection in the background: refresh expired tokens silently, ask the
-    // user to sign in again when that is not possible, and recover after outages.
-    startConnectionMonitor(context, authenticationManager, statusBarManager, refreshAll, health => connectionStatusProvider.setHealth(health));
+        // Reopen Board, Work Items and detail tabs restored after a window reload. Registered after
+        // auto-connect so the restored tabs load with the connection in place.
+        context.subscriptions.push(...registerPanelSerializers(context.extensionUri, {
+            board: (panel, boardId, boardName) => BoardPanel.revive(panel, context.extensionUri, authenticationManager, boardId, boardName),
+            workItemsList: panel => WorkItemsListPanel.revive(panel, context.extensionUri, authenticationManager),
+            workItem: async (panel, workItemId) => {
+                const workItem = await workItemProvider.getWorkItemById(workItemId);
+                if (!workItem) {
+                    return false;
+                }
+                WorkItemPanel.revive(panel, context.extensionUri, authenticationManager, workItem);
+                return true;
+            }
+        }, message => log.info(message)));
 
-    // New installs and empty configurations get the Get Started wizard (with What's new);
-    // configured users get only What's new, once per release.
-    const startupView = OnboardingPanel.startupView(context);
-    if (startupView === 'onboarding') {
-        vscode.commands.executeCommand('azureDevOps.getStarted');
-    } else if (startupView === 'whatsNew') {
-        vscode.commands.executeCommand('azureDevOps.showWhatsNew');
-    }
+        // Watch the connection in the background: refresh expired tokens silently, ask the
+        // user to sign in again when that is not possible, and recover after outages.
+        connectionMonitor.start();
 
-    log.debug('Azure DevOps Boards extension initialized successfully');
+        // New installs and empty configurations get the Get Started wizard (with What's new);
+        // configured users get only What's new, once per release.
+        const startupView = OnboardingPanel.startupView(context);
+        if (startupView === 'onboarding') {
+            vscode.commands.executeCommand('azureDevOps.getStarted');
+        } else if (startupView === 'whatsNew') {
+            vscode.commands.executeCommand('azureDevOps.showWhatsNew');
+        }
+
+        log.info(`Startup finished ${Date.now() - activatedAt} ms after activation (${authenticationManager.isConnected() ? 'connected' : 'not connected'})`);
+    };
+    finishStartup().catch(error => log.error('Startup failed after activation:', error));
+
+    log.info(`Activated in ${Date.now() - activationStart} ms`);
 }
 
 export function deactivate() {

@@ -5,6 +5,7 @@ import { WorkItemTypeEnum } from '../models/workItem';
 import { applyLoadError, describeLoadError } from './loadErrors';
 import { azureDevOps } from '../services/azureDevOpsService';
 import { LIST_FIELDS } from '../utils/workItemBatches';
+import { decorateWorkItemRow } from './workItemTreeItems';
 
 export class BacklogProvider implements vscode.TreeDataProvider<BacklogTreeItem> {
     private _onDidChangeTreeData = new vscode.EventEmitter<BacklogTreeItem | undefined | void>();
@@ -70,23 +71,10 @@ export class BacklogProvider implements vscode.TreeDataProvider<BacklogTreeItem>
                 const workItemIds: number[] = workItemRefs.slice(0, 100).map((wi: any) => wi.target?.id).filter((id: unknown) => typeof id === 'number');
                 const workItems = await azureDevOps().getWorkItems(workItemIds, { fields: LIST_FIELDS });
                 return workItems.map((item: any) => {
-                    const title = item.fields['System.Title'];
-                    const state = item.fields['System.State'];
-                    const type = item.fields['System.WorkItemType'];
-
-                    const treeItem = new BacklogTreeItem(
-                        `#${item.id}: ${title}`,
-                        vscode.TreeItemCollapsibleState.None,
-                        {
-                            command: 'azureDevOps.viewWorkItemDetails',
-                            title: 'View Work Item',
-                            arguments: [item.id]
-                        }
-                    );
-                    treeItem.description = `${type} • ${state}`;
-                    treeItem.contextValue = 'workItem';
+                    const treeItem = decorateWorkItemRow(new BacklogTreeItem('', vscode.TreeItemCollapsibleState.None), item, {
+                        iconPath: this.getIconForWorkItemType(item.fields['System.WorkItemType'])
+                    });
                     treeItem.workItemId = item.id;
-                    treeItem.iconPath = this.getIconForWorkItemType(type);
                     return treeItem;
                 });
             }

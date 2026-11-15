@@ -7,6 +7,7 @@ import { CacheManager } from '../utils/cacheManager';
 import { WorkItemEventManager } from '../events/workItemEventManager';
 import { azureDevOps } from '../services/azureDevOpsService';
 import { applyLoadError, describeLoadError } from './loadErrors';
+import { decorateWorkItemRow, hasChildLinks } from './workItemTreeItems';
 
 export type GroupByOption = 'type' | 'state' | 'assignedTo' | 'sprint' | 'none';
 
@@ -281,34 +282,8 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             const items = this.getWorkItemsForGroup(element);
 
             return items.map(item => {
-                const title = item.fields['System.Title'];
-                const state = item.fields['System.State'];
-                const type = item.fields['System.WorkItemType'];
                 const assignedTo = item.fields['System.AssignedTo']?.displayName || 'Unassigned';
-
-                // Check if item has children
-                const hasChildren = item.relations?.some((rel: any) =>
-                    rel.rel === 'System.LinkTypes.Hierarchy-Forward'
-                ) || false;
-
-                const treeItem = new WorkItemTreeItem(
-                    `#${item.id}: ${title}`,
-                    hasChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
-                    hasChildren ? undefined : {
-                        command: 'azureDevOps.viewWorkItemDetails',
-                        title: 'View Work Item Details',
-                        arguments: [item.id]
-                    }
-                );
-
-                treeItem.description = `${state} • ${assignedTo}`;
-                treeItem.contextValue = 'workItem';
-                treeItem.tooltip = this.createWorkItemTooltip(item);
-                treeItem.iconPath = this.getIconForWorkItemState(state, type);
-                treeItem.workItemId = item.id;
-                treeItem.workItem = item;
-
-                return treeItem;
+                return this.createWorkItemTreeItem(item, `${item.fields['System.State']} • ${assignedTo}`);
             });
             } else if (element.contextValue === 'workItem' && element.workItemId) {
                 // Show child work items
@@ -393,34 +368,17 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
         });
     }
 
-    private createWorkItemTreeItem(item: WorkItem): WorkItemTreeItem {
-        const title = item.fields['System.Title'];
-        const state = item.fields['System.State'];
-        const type = item.fields['System.WorkItemType'];
-        const assignedTo = item.fields['System.AssignedTo']?.displayName || 'Unassigned';
-
-        // Check if item has children
-        const hasChildren = item.relations?.some((rel: any) => 
-            rel.rel === 'System.LinkTypes.Hierarchy-Forward'
-        ) || false;
-
+    private createWorkItemTreeItem(item: WorkItem, description?: string): WorkItemTreeItem {
         const treeItem = new WorkItemTreeItem(
-            `#${item.id}: ${title}`,
-            hasChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
-            hasChildren ? undefined : {
-                command: 'azureDevOps.viewWorkItemDetails',
-                title: 'View Work Item Details',
-                arguments: [item.id]
-            }
+            '',
+            hasChildLinks(item) ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
         );
-
-        treeItem.description = `${type} • ${state}`;
-        treeItem.contextValue = 'workItem';
-        treeItem.tooltip = this.createWorkItemTooltip(item);
-        treeItem.iconPath = this.getIconForWorkItemState(state, type);
+        decorateWorkItemRow(treeItem, item, {
+            description,
+            iconPath: this.getIconForWorkItemState(item.fields['System.State'], item.fields['System.WorkItemType'])
+        });
         treeItem.workItemId = item.id;
         treeItem.workItem = item;
-
         return treeItem;
     }
 
@@ -448,32 +406,7 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             if (childIds.length === 0) return [];
 
             const children = await azureDevOps().getWorkItems(childIds, { expand: 'relations' });
-            return children.map((child: any) => {
-                const title = child.fields['System.Title'];
-                const state = child.fields['System.State'];
-                const type = child.fields['System.WorkItemType'];
-
-                const hasChildren = child.relations?.some((rel: any) => 
-                    rel.rel === 'System.LinkTypes.Hierarchy-Forward'
-                ) || false;
-
-                const treeItem = new WorkItemTreeItem(
-                    `#${child.id}: ${title}`,
-                    hasChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
-                    hasChildren ? undefined : {
-                        command: 'azureDevOps.viewWorkItemDetails',
-                        title: 'View Work Item',
-                        arguments: [child.id]
-                    }
-                );
-
-                treeItem.description = `${type} • ${state}`;
-                treeItem.contextValue = 'workItem';
-                treeItem.workItemId = child.id;
-                treeItem.iconPath = this.getIconForWorkItemState(state, type);
-
-                return treeItem;
-            });
+            return children.map((child: any) => this.createWorkItemTreeItem(child));
         } catch (error) {
             log.error('Failed to load child work items:', error);
             return [];
@@ -620,32 +553,6 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
             default:
                 return new vscode.ThemeIcon('circle');
         }
-    }
-
-    private createWorkItemTooltip(item: WorkItem): vscode.MarkdownString {
-        const fields = item.fields;
-        const md = new vscode.MarkdownString();
-        md.appendMarkdown(`### #${item.id}: ${fields['System.Title']}\n\n`);
-        md.appendMarkdown(`**Type:** ${fields['System.WorkItemType']}\n\n`);
-        md.appendMarkdown(`**State:** ${fields['System.State']}\n\n`);
-        md.appendMarkdown(`**Assigned To:** ${fields['System.AssignedTo']?.displayName || 'Unassigned'}\n\n`);
-        md.appendMarkdown(`**Created:** ${new Date(fields['System.CreatedDate']).toLocaleDateString()}\n\n`);
-        md.appendMarkdown(`**Updated:** ${new Date(fields['System.ChangedDate']).toLocaleDateString()}\n\n`);
-
-        if (fields['Microsoft.VSTS.Common.Priority']) {
-            md.appendMarkdown(`**Priority:** ${fields['Microsoft.VSTS.Common.Priority']}\n\n`);
-        }
-
-        if (fields['System.Tags']) {
-            md.appendMarkdown(`**Tags:** ${fields['System.Tags']}\n\n`);
-        }
-
-        if (fields['System.Description']) {
-            const desc = fields['System.Description'].replace(/<[^>]*>/g, '').substring(0, 200);
-            md.appendMarkdown(`---\n${desc}${desc.length >= 200 ? '...' : ''}`);
-        }
-
-        return md;
     }
 
     async getWorkItemById(id: number): Promise<WorkItem | null> {

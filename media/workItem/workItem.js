@@ -3,6 +3,8 @@ const WORK_ITEM_DATA = JSON.parse(document.getElementById('work-item-data').text
 // Handlers used only in markup this script builds (tag suggestions)
 allowWebviewHandlers(['selectTag', 'removeTag', 'handleTagInput', 'handleTagKeydown', 'showTagSuggestions', 'hideTagSuggestions']);
 const vscode = acquireVsCodeApi();
+// Record which item this tab shows, so VS Code can reopen it after a window reload
+vscode.setState(Object.assign({}, vscode.getState() || {}, { workItemId: WORK_ITEM_DATA.workItemId }));
 console.log('WorkItem panel script loaded');
 
 function showDescriptionEditor() {
@@ -30,7 +32,7 @@ function showDescriptionEditor() {
 }
 
 function hideDescriptionEditor() {
-    const html = descriptionQuill.root.innerHTML;
+    const html = editorHtml(descriptionQuill);
     const text = descriptionQuill.getText().trim();
     const display = document.getElementById('descriptionDisplay');
     const container = document.getElementById('descriptionEditorContainer');
@@ -49,7 +51,7 @@ function hideDescriptionEditor() {
     // Only save if user actually edited the description
     if (descriptionDirty) {
         const title = document.getElementById('title').value;
-        const acceptanceCriteria = acceptanceCriteriaQuill ? acceptanceCriteriaQuill.root.innerHTML : '';
+        const acceptanceCriteria = acceptanceCriteriaQuill ? editorHtml(acceptanceCriteriaQuill) : '';
         vscode.postMessage({ command: 'save', data: { title, description: html, acceptanceCriteria } });
         descriptionDirty = false;
     }
@@ -80,7 +82,7 @@ function showAcceptanceCriteriaEditor() {
 }
 
 function hideAcceptanceCriteriaEditor() {
-    const html = acceptanceCriteriaQuill.root.innerHTML;
+    const html = editorHtml(acceptanceCriteriaQuill);
     const text = acceptanceCriteriaQuill.getText().trim();
     const display = document.getElementById('acceptanceCriteriaDisplay');
     const container = document.getElementById('acceptanceCriteriaEditorContainer');
@@ -99,7 +101,7 @@ function hideAcceptanceCriteriaEditor() {
     // Only save if user actually edited the acceptance criteria
     if (acceptanceCriteriaDirty) {
         const title = document.getElementById('title').value;
-        const description = descriptionQuill ? descriptionQuill.root.innerHTML : '';
+        const description = descriptionQuill ? editorHtml(descriptionQuill) : '';
         vscode.postMessage({ command: 'save', data: { title, description, acceptanceCriteria: html } });
         acceptanceCriteriaDirty = false;
     }
@@ -108,8 +110,33 @@ function hideAcceptanceCriteriaEditor() {
 function toggleMenu(event) {
     event.stopPropagation();
     const menu = document.getElementById('menuDropdown');
-    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+    const open = menu.style.display === 'none';
+    menu.style.display = open ? 'block' : 'none';
+    const button = document.getElementById('menuButton');
+    if (button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+        const first = menu.querySelector('[role="menuitem"]');
+        if (first) first.focus();
+    }
 }
+
+// Arrow keys move through the open menu; Escape closes it and returns to the menu button
+document.addEventListener('keydown', function(event) {
+    const menu = document.getElementById('menuDropdown');
+    if (!menu || menu.style.display === 'none' || !menu.contains(event.target)) return;
+    const items = Array.from(menu.querySelectorAll('[role="menuitem"]'));
+    const index = items.indexOf(event.target);
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        items[(index + step + items.length) % items.length].focus();
+    } else if (event.key === 'Escape' || event.key === 'Tab') {
+        if (event.key === 'Escape') event.preventDefault();
+        hideMenu();
+        const button = document.getElementById('menuButton');
+        if (button && event.key === 'Escape') button.focus();
+    }
+});
 
 function menuOpenInBrowser() {
     openInBrowser();
@@ -123,6 +150,8 @@ function menuRefresh() {
 
 function hideMenu() {
     document.getElementById('menuDropdown').style.display = 'none';
+    const button = document.getElementById('menuButton');
+    if (button) button.setAttribute('aria-expanded', 'false');
 }
 
 document.addEventListener('click', function() {
@@ -131,15 +160,15 @@ document.addEventListener('click', function() {
 
 function saveTitleOnBlur() {
     const title = document.getElementById('title').value;
-    const description = descriptionQuill ? descriptionQuill.root.innerHTML : '';
-    const acceptanceCriteria = acceptanceCriteriaQuill ? acceptanceCriteriaQuill.root.innerHTML : '';
+    const description = descriptionQuill ? editorHtml(descriptionQuill) : '';
+    const acceptanceCriteria = acceptanceCriteriaQuill ? editorHtml(acceptanceCriteriaQuill) : '';
     vscode.postMessage({ command: 'save', data: { title, description, acceptanceCriteria } });
 }
 
 function saveWorkItem() {
     const title = document.getElementById('title').value;
-    const description = descriptionQuill ? descriptionQuill.root.innerHTML : '';
-    const acceptanceCriteria = acceptanceCriteriaQuill ? acceptanceCriteriaQuill.root.innerHTML : '';
+    const description = descriptionQuill ? editorHtml(descriptionQuill) : '';
+    const acceptanceCriteria = acceptanceCriteriaQuill ? editorHtml(acceptanceCriteriaQuill) : '';
     vscode.postMessage({ command: 'save', data: { title, description, acceptanceCriteria } });
 }
 
@@ -148,6 +177,15 @@ function changeState(state) {
 }
 
 let quill;
+/**
+ * The editor's content as standard HTML for Azure DevOps. Quill 2's own markup (root.innerHTML)
+ * writes bullet lists as <ol data-list="bullet">, so use getSemanticHTML, which also turns every
+ * space into &nbsp; in 2.0.x; put those back so text still wraps.
+ */
+function editorHtml(editor) {
+    return editor.getSemanticHTML().replace(/&nbsp;/g, ' ');
+}
+
 let descriptionQuill;
 let acceptanceCriteriaQuill;
 let editQuills = {};
@@ -384,7 +422,7 @@ function saveEdit(commentId) {
     const editor = editQuills[commentId];
     if (!editor) return;
     
-    const html = editor.root.innerHTML;
+    const html = editorHtml(editor);
     const text = editor.getText().trim();
     
     if (text) {
@@ -406,7 +444,7 @@ function deleteComment(commentId) {
 
 function addComment() {
     if (!quill) return;
-    let html = quill.root.innerHTML;
+    let html = editorHtml(quill);
     const text = quill.getText().trim();
     
     // Remove base64 images (they cause 500 errors)
@@ -438,7 +476,12 @@ function assignToMe() {
 }
 
 function scrollToState() {
-    document.getElementById('stateSection').scrollIntoView({ behavior: 'smooth' });
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const section = document.getElementById('stateSection');
+    section.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth' });
+    // Move focus with the scroll so keyboard users land on the state buttons
+    const current = section.querySelector('.state-option.active') || section.querySelector('.state-option');
+    if (current) current.focus({ preventScroll: true });
 }
 
 function openLinkedItem(id) {
@@ -455,8 +498,11 @@ function updateAssignee() {
 
 function updatePriority(priority) {
     console.log('updatePriority called:', priority);
-    document.querySelectorAll('.priority-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelector('.priority-btn.p' + priority).classList.add('active');
+    document.querySelectorAll('.priority-btn').forEach(btn => {
+        const on = btn.classList.contains('p' + priority);
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
     vscode.postMessage({ command: 'updateField', field: 'Microsoft.VSTS.Common.Priority', value: priority });
 }
 

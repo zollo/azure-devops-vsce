@@ -20,7 +20,9 @@ export function startConnectionMonitor(
     authManager: AuthenticationManager,
     statusBar: StatusBarManager,
     refreshViews: () => void,
-    onHealth?: (health: ConnectionHealth) => void
+    onHealth?: (health: ConnectionHealth) => void,
+    /** False registers the commands and listeners now and leaves the first check to monitor.start(). */
+    startNow = true
 ): ConnectionMonitor {
     const onHealthChange = (health: ConnectionHealth) => {
         onHealth?.(health);
@@ -79,7 +81,8 @@ export function startConnectionMonitor(
         }),
         vscode.window.onDidChangeWindowState((state) => {
             // Background checks off (interval 0) means no automatic probes on focus either.
-            if (state.focused && readIntervalMs() > 0 && authManager.getConfig()?.organizationUrl) {
+            // Not before start(): during startup, auto-connect is still running
+            if (state.focused && monitor.isRunning() && readIntervalMs() > 0 && authManager.getConfig()?.organizationUrl) {
                 void monitor.check(FOCUS_RECHECK_AGE_MS);
             }
         }),
@@ -110,6 +113,8 @@ export function startConnectionMonitor(
         })
     );
 
-    monitor.start();
+    if (startNow) {
+        monitor.start();
+    }
     return monitor;
 }

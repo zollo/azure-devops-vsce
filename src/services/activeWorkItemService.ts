@@ -24,9 +24,7 @@ export class ActiveWorkItemService {
     ) {
         this.onActiveWorkItemChanged = new vscode.EventEmitter<WorkItem | null>();
         this.onDidChangeActiveWorkItem = this.onActiveWorkItemChanged.event;
-
-        // Try to restore active work item from previous session
-        this.restoreActiveWorkItem();
+        // The work item from the previous session is restored by restore(), once connected
     }
 
     /**
@@ -109,9 +107,13 @@ export class ActiveWorkItemService {
     }
 
     /**
-     * Restore active work item from previous session
+     * Brings back the work item that was active in the previous session. Called after the
+     * connection is up; at construction there is no connection yet, so it used to give up.
      */
-    private async restoreActiveWorkItem(): Promise<void> {
+    public async restore(): Promise<void> {
+        if (this.activeWorkItem) {
+            return;
+        }
         try {
             const state = this.context.globalState.get<ActiveWorkItemState>(
                 ActiveWorkItemService.ACTIVE_WORK_ITEM_KEY

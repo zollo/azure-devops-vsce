@@ -83,7 +83,7 @@ body {
     background: var(--vscode-menu-background);
     border: 1px solid var(--vscode-menu-border);
     border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
     z-index: 1000;
     min-width: 180px;
 }
@@ -226,7 +226,7 @@ textarea { min-height: 120px; resize: vertical; }
     border-radius: 50%;
     background: var(--vscode-input-border);
 }
-.priority-dot.filled { background: #ffa500; }
+.priority-dot.filled { background: var(--vscode-editorWarning-foreground, #a35200); }
 .tag-chip {
     display: inline-block;
     padding: 3px 8px;
@@ -264,8 +264,8 @@ textarea { min-height: 120px; resize: vertical; }
     align-items: center;
     gap: 4px;
     padding: 4px 8px;
-    background: rgba(33, 150, 243, 0.2);
-    color: #2196f3;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
     border-radius: 10px;
     font-size: 11px;
     font-weight: 500;
@@ -289,7 +289,7 @@ textarea { min-height: 120px; resize: vertical; }
 }
 .tag-remove:hover {
     opacity: 1;
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
 }
 .tag-input {
     flex: 1;
@@ -314,7 +314,7 @@ textarea { min-height: 120px; resize: vertical; }
     max-height: 200px;
     overflow-y: auto;
     z-index: 100;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
 }
 .tag-suggestions.show {
     display: block;
@@ -385,7 +385,7 @@ textarea { min-height: 120px; resize: vertical; }
     background: var(--vscode-dropdown-background);
     border: 1px solid var(--vscode-dropdown-border);
     border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
     z-index: 100;
     margin-top: 2px;
 }
@@ -423,7 +423,7 @@ textarea { min-height: 120px; resize: vertical; }
     white-space: nowrap;
     font-size: 12px;
     opacity: 0.9;
-    color: #ffffff;
+    color: inherit;
 }
 .area-dropdown-list {
     display: none;
@@ -436,7 +436,7 @@ textarea { min-height: 120px; resize: vertical; }
     background: var(--vscode-dropdown-background);
     border: 1px solid var(--vscode-dropdown-border);
     border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
     z-index: 100;
     margin-top: 2px;
 }
@@ -476,7 +476,7 @@ textarea { min-height: 120px; resize: vertical; }
     background: var(--vscode-dropdown-background);
     border: 1px solid var(--vscode-dropdown-border);
     border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
     z-index: 100;
     margin-top: 2px;
 }
@@ -541,13 +541,14 @@ textarea { min-height: 120px; resize: vertical; }
     border-color: var(--vscode-focusBorder);
     transform: scale(1.1);
 }
+/* Same fills as the state badges, so white text keeps 4.5:1 (see src/utils/stateColors.ts) */
 .priority-btn.active {
-    background: #ffa500;
-    border-color: #ffa500;
+    background: #a35200;
+    border-color: #a35200;
     color: white;
 }
 .priority-btn.p1.active { background: #d13438; border-color: #d13438; }
-.priority-btn.p2.active { background: #ffa500; border-color: #ffa500; }
+.priority-btn.p2.active { background: #a35200; border-color: #a35200; }
 .priority-btn.p3.active { background: #0078d4; border-color: #0078d4; }
 .priority-btn.p4.active { background: #107c10; border-color: #107c10; }
 .effort-input {
@@ -577,7 +578,7 @@ textarea { min-height: 120px; resize: vertical; }
 .btn-primary:hover {
     background: var(--vscode-button-hoverBackground);
     transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
 }
 .btn-secondary {
     padding: 10px 20px;
@@ -886,12 +887,88 @@ textarea { min-height: 120px; resize: vertical; }
     border-color: var(--vscode-focusBorder);
 }
 .attachment-btn.delete:hover {
-    color: #d13438;
-    border-color: #d13438;
+    color: var(--vscode-errorForeground);
+    border-color: var(--vscode-errorForeground);
 }
 .no-attachments {
     text-align: center;
     padding: 20px;
     color: var(--vscode-descriptionForeground);
     font-size: 13px;
+}
+
+/* High contrast themes: VS Code supplies contrast borders; draw them on pills and buttons */
+body.vscode-high-contrast .state-pill,
+body.vscode-high-contrast-light .state-pill,
+body.vscode-high-contrast .state-option,
+body.vscode-high-contrast-light .state-option,
+body.vscode-high-contrast .priority-btn,
+body.vscode-high-contrast-light .priority-btn,
+body.vscode-high-contrast .linked-item-state,
+body.vscode-high-contrast-light .linked-item-state,
+body.vscode-high-contrast .tag-chip,
+body.vscode-high-contrast-light .tag-chip {
+    border: 1px solid var(--vscode-contrastBorder);
+}
+
+/* Windows forced colors: colored fills are dropped, so give pills a border and keep focus visible */
+@media (forced-colors: active) {
+    .state-pill,
+    .state-option,
+    .priority-btn,
+    .linked-item-state,
+    .tag-chip,
+    .tag-chip-editable,
+    .type-badge {
+        border: 1px solid CanvasText;
+    }
+    .state-option.active,
+    .priority-btn.active {
+        forced-color-adjust: none;
+        background: Highlight;
+        border-color: Highlight;
+        color: HighlightText;
+    }
+    :focus-visible {
+        outline: 2px solid Highlight;
+    }
+}
+
+/* Keyboard focus */
+button:focus-visible,
+[role="button"]:focus-visible,
+[role="menuitem"]:focus-visible,
+[role="option"]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: 1px;
+}
+
+[role="menuitem"]:focus {
+    background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+    color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+}
+
+button.state-pill {
+    border: none;
+    font-family: inherit;
+}
+
+/* Respect the system setting to reduce motion */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+    .state-pill:hover,
+    .state-option:hover,
+    .priority-btn:hover {
+        transform: none;
+    }
 }

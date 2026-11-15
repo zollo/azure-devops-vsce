@@ -9,41 +9,51 @@ function handleSearchKeydown(event, input) {
     }
 }
 const vscode = acquireVsCodeApi();
+// Record which board this tab shows, so VS Code can reopen it after a window reload
+vscode.setState(Object.assign({}, vscode.getState() || {}, { boardId: BOARD_DATA.boardKey, boardName: BOARD_DATA.boardName }));
 const availableBoards = BOARD_DATA.availableBoards;
 let draggedCard = null;
 let originalColumn = null;
 let selectedCard = null;
 let keyboardMoveMode = false;
+let keyboardMoveOrigin = null;
+// The card being moved with the keyboard; selection can't change it mid-move
+let movingCard = null;
 let contextMenuWorkItemId = null;
+// Where focus goes back to when a menu closes
+let menuReturnFocus = null;
 
-// Avatar color utility - generates consistent colors based on display name
+const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+function scrollBehavior() {
+    return reducedMotion && reducedMotion.matches ? 'auto' : 'smooth';
+}
+
+// Tell screen readers about something that only shows visually, such as a card moving
+function announce(message) {
+    const status = document.getElementById('srStatus');
+    if (!status) return;
+    status.textContent = '';
+    // A fresh text node after clearing makes screen readers read repeated messages again
+    setTimeout(() => { status.textContent = message; }, 30);
+}
+
+// Avatar fills: white initials keep 4.5:1 on each. Same list as AVATAR_COLORS in
+// src/utils/stateColors.ts (a unit test checks they match).
+const AVATAR_COLORS = [
+    '#0078d4', '#8764b8', '#107c10', '#c4314b', '#a35200',
+    '#038387', '#5c2e91', '#b4009e', '#4f6bed', '#986f0b'
+];
+
+// Generates a consistent color from the display name
 function getAvatarColor(displayName) {
     if (!displayName || displayName === 'Unassigned') {
-        return { bg: 'rgba(139, 139, 139, 0.3)', fg: '#8b8b8b' };
+        return { bg: '#6e6e6e', fg: '#ffffff' };
     }
-
-    // Hash the display name to get a consistent number
     let hash = 0;
     for (let i = 0; i < displayName.length; i++) {
         hash = displayName.charCodeAt(i) + ((hash << 5) - hash);
     }
-
-    // Predefined pleasant color palette
-    const colors = [
-        { bg: 'rgba(34, 197, 94, 0.3)', fg: '#22c55e' },   // Green
-        { bg: 'rgba(59, 130, 246, 0.3)', fg: '#3b82f6' },  // Blue
-        { bg: 'rgba(168, 85, 247, 0.3)', fg: '#a855f7' },  // Purple
-        { bg: 'rgba(236, 72, 153, 0.3)', fg: '#ec4899' },  // Pink
-        { bg: 'rgba(251, 146, 60, 0.3)', fg: '#fb923c' },  // Orange
-        { bg: 'rgba(14, 165, 233, 0.3)', fg: '#0ea5e9' },  // Cyan
-        { bg: 'rgba(244, 63, 94, 0.3)', fg: '#f43f5e' },   // Red
-        { bg: 'rgba(234, 179, 8, 0.3)', fg: '#eab308' },   // Yellow
-        { bg: 'rgba(20, 184, 166, 0.3)', fg: '#14b8a6' },  // Teal
-        { bg: 'rgba(139, 92, 246, 0.3)', fg: '#8b5cf6' },  // Violet
-    ];
-
-    const index = Math.abs(hash) % colors.length;
-    return colors[index];
+    return { bg: AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length], fg: '#ffffff' };
 }
 
 // Apply avatar colors after DOM is loaded
@@ -106,6 +116,18 @@ function handleGlobalKeydown(event) {
                 startKeyboardMove();
             }
             break;
+        case 'F10':
+            if (event.shiftKey && selectedCard) {
+                event.preventDefault();
+                openCardMenuFromKeyboard(selectedCard);
+            }
+            break;
+        case 'ContextMenu':
+            if (selectedCard) {
+                event.preventDefault();
+                openCardMenuFromKeyboard(selectedCard);
+            }
+            break;
         case 'Enter':
             if (keyboardMoveMode) {
                 confirmKeyboardMove();
@@ -115,11 +137,12 @@ function handleGlobalKeydown(event) {
             break;
         case 'ArrowUp':
             event.preventDefault();
-            navigateCards(-1);
+            // While moving, up and down would select another card; the move stays on one card
+            if (!keyboardMoveMode) navigateCards(-1);
             break;
         case 'ArrowDown':
             event.preventDefault();
-            navigateCards(1);
+            if (!keyboardMoveMode) navigateCards(1);
             break;
         case 'ArrowLeft':
             event.preventDefault();
@@ -141,13 +164,21 @@ function handleGlobalKeydown(event) {
 }
 
 function selectCard(card) {
+    // Selecting another card (by mouse or Tab) ends a keyboard move and puts the card back
+    if (keyboardMoveMode && card !== movingCard) {
+        cancelKeyboardMove(false);
+    }
     if (selectedCard) {
         selectedCard.classList.remove('selected');
     }
     selectedCard = card;
     if (card) {
         card.classList.add('selected');
-        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // Arrow keys move focus with the selection so screen readers follow it
+        if (document.activeElement !== card) {
+            card.focus({ preventScroll: true });
+        }
+        card.scrollIntoView({ behavior: scrollBehavior(), block: 'nearest' });
     }
 }
 
@@ -185,25 +216,45 @@ function navigateColumns(direction) {
         // Focus empty column
         columns.forEach(c => c.classList.remove('keyboard-focus'));
         targetColumn.classList.add('keyboard-focus');
+        targetColumn.focus({ preventScroll: true });
     }
 }
 
 function startKeyboardMove() {
     if (!selectedCard) return;
     keyboardMoveMode = true;
-    selectedCard.classList.add('keyboard-moving');
+    movingCard = selectedCard;
+    keyboardMoveOrigin = { parent: movingCard.parentElement, next: movingCard.nextSibling };
+    movingCard.classList.add('keyboard-moving');
+    movingCard.setAttribute('aria-grabbed', 'true');
     showToast('Move mode: Use ← → to move, Enter to confirm, Esc to cancel', 'info');
 }
 
-function cancelKeyboardMove() {
+function columnName(card) {
+    const column = card && card.closest('.column');
+    return column ? column.dataset.column : '';
+}
+
+function cancelKeyboardMove(refocus) {
     keyboardMoveMode = false;
-    if (selectedCard) {
-        selectedCard.classList.remove('keyboard-moving');
+    const card = movingCard;
+    movingCard = null;
+    if (card) {
+        card.classList.remove('keyboard-moving');
+        card.removeAttribute('aria-grabbed');
+        // Put the card back where it started
+        if (keyboardMoveOrigin && keyboardMoveOrigin.parent && card.parentElement !== keyboardMoveOrigin.parent) {
+            keyboardMoveOrigin.parent.insertBefore(card, keyboardMoveOrigin.next);
+            updateColumnCounts();
+        }
+        if (refocus !== false) card.focus({ preventScroll: true });
     }
+    keyboardMoveOrigin = null;
     showToast('Move cancelled', 'info');
 }
 
 function moveCardToColumn(direction) {
+    const selectedCard = movingCard;
     if (!selectedCard) return;
 
     const columns = Array.from(document.querySelectorAll('.column:not(.collapsed)'));
@@ -247,9 +298,14 @@ function moveCardToColumn(direction) {
     }
 
     updateColumnCounts();
+    // Moving the element drops focus; keep it on the card being moved
+    selectedCard.focus({ preventScroll: true });
+    selectedCard.scrollIntoView({ behavior: scrollBehavior(), block: 'nearest', inline: 'nearest' });
+    announce('In ' + targetColumn.dataset.column + '. Press Enter to move it here, or Escape to cancel.');
 }
 
 function confirmKeyboardMove() {
+    const selectedCard = movingCard;
     if (!selectedCard || !keyboardMoveMode) return;
 
     const column = selectedCard.closest('.column');
@@ -277,7 +333,77 @@ function confirmKeyboardMove() {
     });
 
     keyboardMoveMode = false;
+    keyboardMoveOrigin = null;
+    movingCard = null;
     selectedCard.classList.remove('keyboard-moving');
+    selectedCard.removeAttribute('aria-grabbed');
+    announce('Moved to ' + targetColumn + '.');
+}
+
+// Menus (context menu, card menu): arrow keys move between items, Escape closes and returns
+// focus to where it was
+function menuItems(menu) {
+    return Array.from(menu.querySelectorAll('[role="menuitem"]')).filter(item => item.offsetParent !== null);
+}
+
+function focusFirstMenuItem(menu) {
+    const items = menuItems(menu);
+    if (items.length) items[0].focus();
+}
+
+function handleMenuKeydown(event) {
+    const menu = event.target.closest && event.target.closest('[role="menu"]');
+    if (!menu) return false;
+    const items = menuItems(menu);
+    const index = items.indexOf(event.target);
+    switch (event.key) {
+        case 'ArrowDown':
+            event.preventDefault();
+            if (items.length) items[(index + 1) % items.length].focus();
+            return true;
+        case 'ArrowUp':
+            event.preventDefault();
+            if (items.length) items[(index - 1 + items.length) % items.length].focus();
+            return true;
+        case 'Home':
+            event.preventDefault();
+            if (items.length) items[0].focus();
+            return true;
+        case 'End':
+            event.preventDefault();
+            if (items.length) items[items.length - 1].focus();
+            return true;
+        case 'Escape':
+        case 'Tab':
+            if (event.key === 'Escape') event.preventDefault();
+            hideContextMenu();
+            hideCardMenu();
+            return true;
+        default:
+            // Enter and Space are handled by the item itself
+            return event.key === 'Enter' || event.key === ' ';
+    }
+}
+
+function restoreMenuFocus() {
+    const target = menuReturnFocus;
+    menuReturnFocus = null;
+    // Only when focus is still in a menu or was dropped; a click into the search box keeps it
+    const active = document.activeElement;
+    const lost = !active || active === document.body || (active.closest && active.closest('[role="menu"]'));
+    if (lost && target && document.contains(target)) {
+        target.focus({ preventScroll: true });
+    }
+}
+
+function openCardMenuFromKeyboard(card) {
+    const rect = card.getBoundingClientRect();
+    showCardMenu({
+        pageX: rect.left + window.scrollX + 16,
+        pageY: rect.top + window.scrollY + 24,
+        preventDefault() {},
+        stopPropagation() {}
+    }, parseInt(card.dataset.id));
 }
 
 // Context Menu
@@ -287,6 +413,7 @@ function showContextMenu(event, workItemId) {
 
     contextMenuWorkItemId = workItemId;
     const menu = document.getElementById('contextMenu');
+    menuReturnFocus = document.activeElement;
 
     menu.style.left = event.pageX + 'px';
     menu.style.top = event.pageY + 'px';
@@ -303,8 +430,11 @@ function showContextMenu(event, workItemId) {
 }
 
 function hideContextMenu() {
-    document.getElementById('contextMenu').classList.remove('show');
+    const menu = document.getElementById('contextMenu');
+    const wasOpen = menu.classList.contains('show');
+    menu.classList.remove('show');
     contextMenuWorkItemId = null;
+    if (wasOpen) restoreMenuFocus();
 }
 
 function contextMenuAction(action, value) {
@@ -354,13 +484,20 @@ function switchBoard(boardId, boardName) {
 // Column Collapse
 function toggleColumn(column) {
     column.classList.toggle('collapsed');
+    const collapsed = column.classList.contains('collapsed');
     const btn = column.querySelector('.collapse-btn');
-    btn.textContent = column.classList.contains('collapsed') ? '▶' : '◀';
+    const icon = btn.querySelector('[aria-hidden]') || btn;
+    icon.textContent = collapsed ? '▶' : '◀';
+    btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    btn.setAttribute('aria-label', (collapsed ? 'Expand ' : 'Collapse ') + column.dataset.column + ' column');
 }
 
 // Keyboard Help
 function toggleKeyboardHelp() {
-    document.getElementById('keyboardHelp').classList.toggle('show');
+    const help = document.getElementById('keyboardHelp');
+    help.classList.toggle('show');
+    const button = document.querySelector('[aria-controls="keyboardHelp"]');
+    if (button) button.setAttribute('aria-expanded', help.classList.contains('show') ? 'true' : 'false');
 }
 
 // Drag and Drop
@@ -615,10 +752,12 @@ let currentCardMenuWorkItemId = null;
 function showCardMenu(event, workItemId) {
     const menu = document.getElementById('cardMenu');
     currentCardMenuWorkItemId = workItemId;
+    menuReturnFocus = document.querySelector('.card[data-id="' + Number(workItemId) + '"]') || document.activeElement;
 
     menu.style.left = event.pageX + 'px';
     menu.style.top = event.pageY + 'px';
     menu.classList.add('show');
+    focusFirstMenuItem(menu);
 
     setTimeout(() => {
         document.addEventListener('click', hideCardMenu);
@@ -627,8 +766,10 @@ function showCardMenu(event, workItemId) {
 
 function hideCardMenu() {
     const menu = document.getElementById('cardMenu');
+    const wasOpen = menu.classList.contains('show');
     menu.classList.remove('show');
     document.removeEventListener('click', hideCardMenu);
+    if (wasOpen) restoreMenuFocus();
 }
 
 function cardMenuAction(action) {
@@ -806,6 +947,12 @@ function toggleChildChecklist(parentWorkItemId, typeId) {
             if (cl.id !== checklistId) {
                 cl.classList.remove('expanded');
             }
+        });
+
+        // Keep each type's toggle in step for screen readers
+        document.querySelectorAll('.card[data-id="' + Number(parentWorkItemId) + '"] .child-indicator-item').forEach(function(toggle) {
+            const opens = toggle.getAttribute('data-click-args') || '';
+            toggle.setAttribute('aria-expanded', !isExpanded && opens.indexOf(JSON.stringify(typeId)) !== -1 ? 'true' : 'false');
         });
 
         if (isExpanded) {
@@ -1335,7 +1482,16 @@ function toggleHideDone() {
 // Add 'F' keyboard shortcut to toggle filter bar
 const originalKeydownHandler = handleGlobalKeydown;
 function handleGlobalKeydownWithFilter(event) {
-    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || event.target.tagName === 'SELECT') {
+        return;
+    }
+    if (handleMenuKeydown(event)) {
+        return;
+    }
+    // Buttons and other controls inside a card handle their own keys; the board shortcuts
+    // apply to the card itself
+    const control = event.target.closest && event.target.closest('button, a, [role="button"], [role="option"], [contenteditable="true"]');
+    if (control && !control.classList.contains('card') && event.key !== 'Escape') {
         return;
     }
     if (event.key === 'f' || event.key === 'F') {

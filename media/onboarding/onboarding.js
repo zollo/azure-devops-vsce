@@ -141,7 +141,7 @@
     const REPO = 'https://github.com/zollo/azure-devops-vsce';
 
     function highlight(/** @type {any} */ item, compact = false) {
-        return h('div', { className: compact ? 'highlight compact' : 'feature highlight' },
+        return h(compact ? 'div' : 'li', { className: compact ? 'highlight compact' : 'feature highlight' },
             icon(String(item.icon || 'sparkle').replace(/[^a-z0-9-]/g, '')),
             h('div', {}, h('h3', {}, item.title), h('p', {}, item.text)));
     }
@@ -167,7 +167,7 @@
                 return items.length
                     ? h('section', { className: 'whats-new-group', 'aria-label': title },
                         h('h2', {}, title),
-                        h('div', { className: 'features' }, items.map((/** @type {any} */ item) => highlight(item))))
+                        h('ul', { className: 'features' }, items.map((/** @type {any} */ item) => highlight(item))))
                     : null;
             }),
             h('div', { className: 'actions' },
@@ -184,9 +184,10 @@
     function renderWelcome() {
         return [
             header('Welcome to ADO Boards', 'The extension is installed. Connect it to Azure DevOps to bring your work items, boards and sprints into VS Code.'),
-            h('section', { className: 'features', 'aria-label': 'Features' },
+            // A plain list, not cards: nothing here can be opened before you sign in
+            h('ul', { className: 'features', 'aria-label': 'Features' },
                 FEATURES.map(([name, title, text]) =>
-                    h('div', { className: 'feature' }, icon(name), h('div', {}, h('h3', {}, title), h('p', {}, text))))),
+                    h('li', { className: 'feature' }, icon(name), h('div', {}, h('h3', {}, title), h('p', {}, text))))),
             h('section', { className: 'auth' },
                 h('h2', {}, 'How do you sign in to Azure DevOps?'),
                 errorBanner(),
