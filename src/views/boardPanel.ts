@@ -84,6 +84,11 @@ export class BoardPanel {
         hideDone?: boolean;
     } = {};
     private _isLoading: boolean = false;
+    /** The last board page set on the webview; an unchanged refresh doesn't rebuild the page. */
+    private _lastBoardHtml: string | undefined;
+    /** True while the person is dragging, editing or has a menu open; automatic refreshes wait. */
+    private _uiBusy = false;
+    private _refreshPendingWhileBusy = false;
     private _loadDebounceTimer: NodeJS.Timeout | undefined;
     private _teamIterations: Array<{name: string, path: string, timeFrame: string}> = [];
 
@@ -122,6 +127,8 @@ export class BoardPanel {
         BoardPanel.currentPanel = new BoardPanel(panel, extensionUri, authenticationManager, boardId, boardName);
     }
 
+    private static readonly EVENT_SOURCE = 'board';
+
     private constructor(
         panel: vscode.WebviewPanel,
         extensionUri: vscode.Uri,
@@ -139,7 +146,11 @@ export class BoardPanel {
         this._panel.webview.html = this._getLoadingHtml();
 
         // Subscribe to work item updates from other views with debouncing
-        this.eventSubscription = this.eventManager.onWorkItemUpdated(() => {
+        this.eventSubscription = this.eventManager.onWorkItemUpdated((event) => {
+            // The board already shows its own edits; reloading for them only redrew the page
+            if (event.source === BoardPanel.EVENT_SOURCE) {
+                return;
+            }
             // Don't refresh if we have pending moves (to avoid race conditions)
             if (this._pendingMoves.size === 0 && !this._isLoading) {
                 // Debounce - wait 2 seconds before actually refreshing
@@ -234,6 +245,13 @@ export class BoardPanel {
                     case 'saveFilterState':
                         this._filterState = message.filterState || {};
                         break;
+                    case 'uiBusy':
+                        this._uiBusy = !!message.busy;
+                        if (!this._uiBusy && this._refreshPendingWhileBusy) {
+                            this._refreshPendingWhileBusy = false;
+                            await this._loadAndRender();
+                        }
+                        break;
                     case 'debugLog':
                         outputChannel.appendLine(`[Webview] ${message.text}`);
                         break;
@@ -282,6 +300,12 @@ export class BoardPanel {
             return;
         }
 
+        // Don't redraw under the person's hands; refresh once they finish dragging or editing
+        if (!fullRefresh && this._uiBusy && this.currentBoard) {
+            this._refreshPendingWhileBusy = true;
+            return;
+        }
+
         try {
             this._isLoading = true;
             // Update last refresh time
@@ -291,6 +315,7 @@ export class BoardPanel {
             // Show loading screen only on initial load, not on refresh
             if (!this.currentBoard) {
                 this._panel.webview.html = this._getLoadingHtml();
+                this._lastBoardHtml = undefined;
             }
 
             // Check if metadata cache is still valid (within 5 minutes)
@@ -301,27 +326,26 @@ export class BoardPanel {
             if (!metadataCacheValid) {
                 outputChannel.appendLine('[Board] Reloading metadata (cache expired or full refresh)');
 
-                if (fullRefresh || this.availableBoards.length === 0) {
-                    this.availableBoards = await this._getAvailableBoards();
-                }
-                if (fullRefresh || this._tagColors.size === 0) {
-                    await this._getTagColors();
-                }
-                if (fullRefresh || this._projectWorkItemTypes.length === 0) {
-                    await this._fetchProjectWorkItemTypes();
-                }
-                if (fullRefresh || this._teamMembers.length === 0) {
-                    this._teamMembers = await this._getTeamMembers();
-                }
-                if (fullRefresh || this._teamIterations.length === 0) {
-                    this._teamIterations = await this._getAllTeamIterations();
-                }
-                if (fullRefresh || !this._currentIterationPath) {
-                    this._currentIterationPath = await this._getCurrentIteration();
-                }
-                if (fullRefresh || !this._teamAreaPath) {
-                    this._teamAreaPath = await this._getTeamAreaPath();
-                }
+                // These lookups don't depend on each other, so they run together
+                await Promise.all([
+                    (fullRefresh || this.availableBoards.length === 0)
+                        ? this._getAvailableBoards().then(boards => { this.availableBoards = boards; })
+                        : undefined,
+                    (fullRefresh || this._tagColors.size === 0) ? this._getTagColors() : undefined,
+                    (fullRefresh || this._projectWorkItemTypes.length === 0) ? this._fetchProjectWorkItemTypes() : undefined,
+                    (fullRefresh || this._teamMembers.length === 0)
+                        ? this._getTeamMembers().then(members => { this._teamMembers = members; })
+                        : undefined,
+                    (fullRefresh || this._teamIterations.length === 0)
+                        ? this._getAllTeamIterations().then(iterations => { this._teamIterations = iterations; })
+                        : undefined,
+                    (fullRefresh || !this._currentIterationPath)
+                        ? this._getCurrentIteration().then(path => { this._currentIterationPath = path; })
+                        : undefined,
+                    (fullRefresh || !this._teamAreaPath)
+                        ? this._getTeamAreaPath().then(path => { this._teamAreaPath = path; })
+                        : undefined
+                ]);
 
                 // Update cache timestamp
                 this._metadataCacheTime = now;
@@ -383,7 +407,14 @@ export class BoardPanel {
             }
 
             try {
-                this._panel.webview.html = this._getHtmlForWebview();
+                const html = this._getHtmlForWebview();
+                if (html === this._lastBoardHtml) {
+                    // Nothing on the board changed: keep the page as it is instead of redrawing it
+                    outputChannel.appendLine('[Board] No changes since the last refresh');
+                    return;
+                }
+                this._lastBoardHtml = html;
+                this._panel.webview.html = html;
 
                 // Restore filter state after HTML is loaded
                 if (Object.keys(this._filterState).length > 0) {
@@ -447,6 +478,7 @@ export class BoardPanel {
             }
 
             this._panel.webview.html = this._getErrorHtml(message, details, actionable);
+            this._lastBoardHtml = undefined;
         } finally {
             this._isLoading = false;
         }
@@ -1392,6 +1424,7 @@ export class BoardPanel {
 
             // Broadcast state change to all views
             this.eventManager.notifyWorkItemUpdated({
+                source: BoardPanel.EVENT_SOURCE,
                 workItemId,
                 updateType: 'state-change',
                 changes: [{ field: '/fields/System.State', newValue: targetState }]
@@ -1463,6 +1496,7 @@ export class BoardPanel {
 
             // Broadcast work item creation to all views
             this.eventManager.notifyWorkItemUpdated({
+                source: BoardPanel.EVENT_SOURCE,
                 workItemId: response.data.id,
                 updateType: 'create',
                 changes: [
@@ -1502,6 +1536,7 @@ export class BoardPanel {
 
             // Broadcast assignment to all views
             this.eventManager.notifyWorkItemUpdated({
+                source: BoardPanel.EVENT_SOURCE,
                 workItemId,
                 updateType: 'assign',
                 changes: [{ field: '/fields/System.AssignedTo', newValue: currentUser.uniqueName }]
@@ -1562,6 +1597,7 @@ export class BoardPanel {
 
             // Broadcast state change to all views
             this.eventManager.notifyWorkItemUpdated({
+                source: BoardPanel.EVENT_SOURCE,
                 workItemId,
                 updateType: 'state-change',
                 changes: [{ field: '/fields/System.State', newValue: newState }]
@@ -1715,6 +1751,7 @@ export class BoardPanel {
 
             // Broadcast assignment to all views
             this.eventManager.notifyWorkItemUpdated({
+                source: BoardPanel.EVENT_SOURCE,
                 workItemId,
                 updateType: 'assign',
                 changes: [{ field: '/fields/System.AssignedTo', newValue: selected.uniqueName }]
@@ -1768,6 +1805,7 @@ export class BoardPanel {
 
             // Broadcast deletion to all views
             this.eventManager.notifyWorkItemUpdated({
+                source: BoardPanel.EVENT_SOURCE,
                 workItemId,
                 updateType: 'delete'
             });
@@ -1950,6 +1988,7 @@ export class BoardPanel {
 
             // Broadcast update to all views
             this.eventManager.notifyWorkItemUpdated({
+                source: BoardPanel.EVENT_SOURCE,
                 workItemId,
                 updateType: 'update',
                 changes: [{ field: '/fields/System.IterationPath', newValue: selected.iterationPath }]
@@ -5786,6 +5825,102 @@ export class BoardPanel {
             // Apply the restored filters
             applyFilters();
         }
+
+        // Keep scroll positions, collapsed columns and the filter bar across refreshes, and tell
+        // the extension while the person is dragging, editing or has a menu open, so an automatic
+        // refresh doesn't redraw the board under them.
+        (function () {
+            // Saved per board, so switching boards doesn't carry one board's layout to another
+            const boardKey = ${serializeForScript(this.boardId)};
+            function persistView(view) {
+                const state = vscode.getState() || {};
+                const views = Object.assign({}, state.views || {});
+                views[boardKey] = view;
+                vscode.setState(Object.assign({}, state, { views: views }));
+            }
+
+            function captureView() {
+                const container = document.getElementById('boardContainer');
+                const columnScroll = {};
+                const collapsed = [];
+                document.querySelectorAll('.column').forEach(col => {
+                    const name = col.dataset.column;
+                    const body = col.querySelector('.column-body');
+                    if (body && body.scrollTop) columnScroll[name] = body.scrollTop;
+                    if (col.classList.contains('collapsed')) collapsed.push(name);
+                });
+                const filterBar = document.getElementById('filterBar');
+                const search = document.getElementById('searchInput');
+                persistView({
+                    x: window.scrollX,
+                    y: window.scrollY,
+                    boardX: container ? container.scrollLeft : 0,
+                    columnScroll: columnScroll,
+                    collapsed: collapsed,
+                    filterBarCollapsed: filterBar ? filterBar.classList.contains('collapsed') : undefined,
+                    searchFocused: !!search && document.activeElement === search,
+                    searchCaret: search && document.activeElement === search ? search.selectionStart : null
+                });
+            }
+
+            function restoreView(view) {
+                if (!view) return;
+                (view.collapsed || []).forEach(name => {
+                    const col = Array.from(document.querySelectorAll('.column')).find(c => c.dataset.column === name);
+                    if (col && !col.classList.contains('collapsed')) toggleColumn(col);
+                });
+                const filterBar = document.getElementById('filterBar');
+                if (filterBar && typeof view.filterBarCollapsed === 'boolean'
+                    && filterBar.classList.contains('collapsed') !== view.filterBarCollapsed) {
+                    toggleFilterBar();
+                }
+                const container = document.getElementById('boardContainer');
+                if (container && view.boardX) container.scrollLeft = view.boardX;
+                document.querySelectorAll('.column').forEach(col => {
+                    const top = (view.columnScroll || {})[col.dataset.column];
+                    const body = col.querySelector('.column-body');
+                    if (body && top) body.scrollTop = top;
+                });
+                if (view.x || view.y) window.scrollTo(view.x || 0, view.y || 0);
+                const search = document.getElementById('searchInput');
+                if (search && view.searchFocused) {
+                    search.focus();
+                    if (typeof view.searchCaret === 'number') search.setSelectionRange(view.searchCaret, view.searchCaret);
+                }
+            }
+
+            restoreView(((vscode.getState() || {}).views || {})[boardKey]);
+
+            let captureTimer = null;
+            function scheduleCapture() {
+                clearTimeout(captureTimer);
+                captureTimer = setTimeout(captureView, 150);
+            }
+            window.addEventListener('scroll', scheduleCapture, true);
+            document.addEventListener('click', scheduleCapture, true);
+            document.addEventListener('focusin', scheduleCapture);
+            document.addEventListener('keyup', scheduleCapture);
+
+            function isBusy() {
+                if (draggedCard || keyboardMoveMode) return true;
+                if (document.querySelector('.context-menu.show, .board-dropdown.show, .filter-dropdown-content.show')) return true;
+                const active = document.activeElement;
+                if (active && active.id !== 'searchInput'
+                    && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT' || active.isContentEditable)) {
+                    return true;
+                }
+                return false;
+            }
+
+            let lastBusy = false;
+            setInterval(function () {
+                const busy = isBusy();
+                if (busy !== lastBusy) {
+                    lastBusy = busy;
+                    vscode.postMessage({ command: 'uiBusy', busy: busy });
+                }
+            }, 500);
+        })();
     </script>
 </body>
 </html>`;
