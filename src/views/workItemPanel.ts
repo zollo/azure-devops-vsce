@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
 import { vendorAssetUri } from '../utils/webviewAssets';
-import { jsArg, sanitizeRichText, serializeForScript, webviewCsp } from '../utils/webviewSecurity';
+import { escapeHtml, jsArg, sanitizeRichText, serializeForScript, webviewCsp } from '../utils/webviewSecurity';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem } from '../models/workItem';
 import { WorkItemEventManager } from '../events/workItemEventManager';
+import { METADATA_TTL_MS, metadataKey, sharedMetadataCache } from '../utils/metadataCache';
+import { fetchWorkItemsInBatches } from '../utils/workItemBatches';
 
 interface IterationInfo {
     id: string;
@@ -26,6 +28,9 @@ interface TeamMemberInfo {
 }
 
 export class WorkItemPanel {
+    /** One panel per work item: opening an item that is already open reveals its tab. */
+    private static readonly openPanels = new Map<number, WorkItemPanel>();
+
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
     private _workItem: WorkItem | null = null;
@@ -48,10 +53,16 @@ export class WorkItemPanel {
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
 
-        // Always create new panel for each work item
+        const existing = WorkItemPanel.openPanels.get(workItem.id);
+        if (existing) {
+            existing._panel.reveal(existing._panel.viewColumn);
+            existing.update(workItem);
+            return;
+        }
+
         const panel = vscode.window.createWebviewPanel(
             `workItemDetails-${workItem.id}`,
-            `#${workItem.id}`,
+            WorkItemPanel.panelTitle(workItem),
             column || vscode.ViewColumn.One,
             {
                 enableScripts: true,
@@ -60,7 +71,17 @@ export class WorkItemPanel {
             }
         );
 
-        new WorkItemPanel(panel, extensionUri, authenticationManager, workItem);
+        WorkItemPanel.openPanels.set(workItem.id, new WorkItemPanel(panel, extensionUri, authenticationManager, workItem));
+    }
+
+    /** Tab title: the id plus the start of the title, so several open items can be told apart. */
+    private static panelTitle(workItem: WorkItem): string {
+        const title = String(workItem.fields?.['System.Title'] ?? '').trim();
+        if (!title) {
+            return `#${workItem.id}`;
+        }
+        const short = title.length > 30 ? `${title.slice(0, 29).trimEnd()}\u2026` : title;
+        return `#${workItem.id} ${short}`;
     }
 
     private constructor(
@@ -148,7 +169,7 @@ export class WorkItemPanel {
 
     public update(workItem: WorkItem) {
         this._workItem = workItem;
-        this._panel.title = `#${workItem.id}`;
+        this._panel.title = WorkItemPanel.panelTitle(workItem);
         this._update();
     }
 
@@ -359,6 +380,8 @@ export class WorkItemPanel {
             );
 
             vscode.window.showInformationMessage('Tags updated');
+            // A new tag should show up in the suggestions straight away
+            sharedMetadataCache.invalidate(this.tagsCacheKey());
             await this.refreshWorkItem();
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to update tags: ${error}`);
@@ -596,6 +619,7 @@ export class WorkItemPanel {
                 params: { '$expand': 'all', 'api-version': '7.0' }
             });
             this._workItem = response.data;
+            this._panel.title = WorkItemPanel.panelTitle(response.data);
             this._update();
         } catch (error) {
             console.error('Failed to refresh:', error);
@@ -612,71 +636,183 @@ export class WorkItemPanel {
         }
     }
 
-    private _update() {
-        Promise.all([
-            this.getComments(),
-            this.getLinkedItems(),
-            this.getIterations(),
-            this.getAreas(),
-            this.getTeamMembers(),
-            this.getExistingTags(),
-            this.getAttachments(),
-            this.getAvailableStates(),
-            this.authenticationManager.getCurrentUser().catch(err => {
-                console.error('Failed to get current user, using fallback:', err);
-                return null;
-            })
-        ]).then(([comments, linkedItems, iterations, areas, teamMembers, existingTags, attachments, availableStates, currentUser]) => {
+    private _updateGeneration = 0;
+    private _disposed = false;
+
+    /**
+     * Loads everything the page shows and renders it. Each lookup falls back to an empty value
+     * on its own, so one failing request (for example no permission to read team members)
+     * leaves that part empty instead of leaving the whole panel blank.
+     */
+    private async _update(): Promise<void> {
+        const generation = ++this._updateGeneration;
+        const settle = async <T>(what: string, promise: Promise<T>, fallback: T): Promise<T> => {
+            try {
+                return await promise;
+            } catch (error) {
+                console.error(`[WorkItemPanel] Failed to load ${what}:`, error);
+                return fallback;
+            }
+        };
+
+        try {
+            const [comments, linkedItems, iterations, areas, teamMembers, existingTags, attachments, availableStates, currentUser] = await Promise.all([
+                settle('comments', this.getComments(), [] as any[]),
+                settle('linked items', this.getLinkedItems(), [] as any[]),
+                settle('iterations', this.getIterations(), [] as IterationInfo[]),
+                settle('areas', this.getAreas(), [] as AreaInfo[]),
+                settle('team members', this.getTeamMembers(), [] as TeamMemberInfo[]),
+                settle('tags', this.getExistingTags(), [] as string[]),
+                settle('attachments', this.getAttachments(), [] as any[]),
+                settle('states', this.getAvailableStates(), ['New', 'Active', 'Resolved', 'Closed']),
+                settle('current user', this.authenticationManager.getCurrentUser(), null)
+            ]);
+
+            // A newer update started while this one was loading; let that one render.
+            if (generation !== this._updateGeneration || this._disposed) {
+                return;
+            }
+
             this._iterations = iterations;
             this._areas = areas;
             this._teamMembers = teamMembers;
             this._existingTags = existingTags;
             this._availableStates = availableStates;
             this._panel.webview.html = this._getHtmlForWebview(comments, linkedItems, attachments, currentUser);
+        } catch (error: any) {
+            console.error('[WorkItemPanel] Failed to render work item:', error);
+            if (generation === this._updateGeneration && !this._disposed) {
+                this._panel.webview.html = this._getErrorHtml(error?.message || String(error));
+            }
+        }
+    }
+
+    /** Shown when the page itself can't be built, with a way to try again. */
+    private _getErrorHtml(message: string): string {
+        const id = this._workItem?.id ?? '';
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview)}">
+    <style>
+        body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 24px; }
+        button { margin-top: 12px; padding: 4px 12px; border: none; cursor: pointer;
+            color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+        button:hover { background: var(--vscode-button-hoverBackground); }
+        p { color: var(--vscode-descriptionForeground); }
+    </style>
+</head>
+<body>
+    <h2>Couldn't show work item #${escapeHtml(id)}</h2>
+    <p>${escapeHtml(message)}</p>
+    <button id="retry">Try again</button>
+    <script>
+        const vscode = acquireVsCodeApi();
+        document.getElementById('retry').addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));
+    </script>
+</body>
+</html>`;
+    }
+
+    /** Cache key scope: the connection's organization, project and team. */
+    private metadataScope(): string[] {
+        const config = this.authenticationManager.getConfig();
+        return [config?.organizationUrl ?? '', config?.defaultProject ?? '', config?.defaultTeam ?? ''];
+    }
+
+    // Team and project metadata is shared by every open work item panel for 10 minutes.
+    private getIterations(): Promise<IterationInfo[]> {
+        return sharedMetadataCache.getOrLoad(metadataKey('panel-iterations', ...this.metadataScope()), METADATA_TTL_MS, () => this.loadIterations());
+    }
+
+    private getAreas(): Promise<AreaInfo[]> {
+        return sharedMetadataCache.getOrLoad(metadataKey('panel-areas', ...this.metadataScope()), METADATA_TTL_MS, () => this.loadAreas());
+    }
+
+    private getTeamMembers(): Promise<TeamMemberInfo[]> {
+        return sharedMetadataCache.getOrLoad(metadataKey('panel-members', ...this.metadataScope()), METADATA_TTL_MS, () => this.loadTeamMembers());
+    }
+
+    private tagsCacheKey(): string {
+        const [org, project] = this.metadataScope();
+        return metadataKey('tags', org, project);
+    }
+
+    private getExistingTags(): Promise<string[]> {
+        return sharedMetadataCache.getOrLoad(this.tagsCacheKey(), METADATA_TTL_MS, () => this.loadExistingTags());
+    }
+
+    private async getAvailableStates(): Promise<string[]> {
+        const workItemType = this._workItem?.fields['System.WorkItemType'];
+        if (!workItemType) return [];
+        const [org, project] = this.metadataScope();
+        return sharedMetadataCache.getOrLoad(metadataKey('states', org, project, workItemType), METADATA_TTL_MS, () => this.loadAvailableStates(workItemType));
+    }
+
+    /** The work item's relations, from the loaded item when it has them, otherwise fetched once. */
+    private async getRelations(): Promise<any[]> {
+        if (!this._workItem) return [];
+        if (Array.isArray(this._workItem.relations)) {
+            return this._workItem.relations;
+        }
+        const axiosInstance = this.authenticationManager.getAxiosInstance();
+        if (!axiosInstance) return [];
+        const response = await axiosInstance.get(`/_apis/wit/workitems/${this._workItem.id}`, {
+            params: { '$expand': 'relations', 'api-version': '7.0' }
         });
+        this._workItem.relations = response.data.relations || [];
+        return this._workItem.relations || [];
     }
 
     private async getLinkedItems(): Promise<any[]> {
         if (!this._workItem) return [];
 
-        try {
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            if (!axiosInstance) return [];
+        const axiosInstance = this.authenticationManager.getAxiosInstance();
+        if (!axiosInstance) return [];
 
-            const response = await axiosInstance.get(`/_apis/wit/workitems/${this._workItem.id}`, {
-                params: { '$expand': 'relations', 'api-version': '7.0' }
-            });
-
-            const relations = response.data.relations || [];
-            const linkedItems: any[] = [];
-
-            for (const relation of relations) {
-                if (relation.rel && relation.url && relation.url.includes('workItems')) {
-                    const linkedIdMatch = relation.url.match(/workItems\/(\d+)/);
-                    if (linkedIdMatch) {
-                        const linkedId = parseInt(linkedIdMatch[1]);
-                        try {
-                            const linkedResponse = await axiosInstance.get(`/_apis/wit/workitems/${linkedId}`, {
-                                params: { 'api-version': '7.0' }
-                            });
-                            linkedItems.push({
-                                id: linkedId,
-                                title: linkedResponse.data.fields['System.Title'],
-                                state: linkedResponse.data.fields['System.State'],
-                                type: linkedResponse.data.fields['System.WorkItemType'],
-                                linkType: this.getLinkTypeName(relation.rel)
-                            });
-                        } catch (e) {
-                            // Skip if can't fetch
-                        }
-                    }
+        const links: Array<{ id: number; rel: string }> = [];
+        for (const relation of await this.getRelations()) {
+            if (relation.rel && relation.url && relation.url.includes('workItems')) {
+                const linkedIdMatch = relation.url.match(/workItems\/(\d+)/);
+                if (linkedIdMatch) {
+                    links.push({ id: parseInt(linkedIdMatch[1], 10), rel: relation.rel });
                 }
             }
-
-            return linkedItems;
-        } catch (error) {
-            return [];
         }
+        if (links.length === 0) return [];
+
+        // One request per 200 linked items instead of one per item.
+        const linked = await fetchWorkItemsInBatches(
+            links.map(link => link.id),
+            async batch => {
+                const response = await axiosInstance.get('/_apis/wit/workitems', {
+                    params: {
+                        ids: batch.join(','),
+                        fields: 'System.Title,System.State,System.WorkItemType',
+                        errorPolicy: 'omit',
+                        'api-version': '7.0'
+                    }
+                });
+                // errorPolicy=omit returns null for items that were deleted or can't be read.
+                return (response.data.value || []).filter((item: any) => item && item.fields);
+            },
+            error => console.error('[WorkItemPanel] Failed to load linked items:', error)
+        );
+        const byId = new Map(linked.map((item: any) => [item.id, item]));
+
+        return links
+            .filter(link => byId.has(link.id))
+            .map(link => {
+                const fields = byId.get(link.id).fields;
+                return {
+                    id: link.id,
+                    title: fields['System.Title'],
+                    state: fields['System.State'],
+                    type: fields['System.WorkItemType'],
+                    linkType: this.getLinkTypeName(link.rel)
+                };
+            });
     }
 
     private getLinkTypeName(rel: string): string {
@@ -694,14 +830,7 @@ export class WorkItemPanel {
         if (!this._workItem) return [];
 
         try {
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            if (!axiosInstance) return [];
-
-            const response = await axiosInstance.get(`/_apis/wit/workitems/${this._workItem.id}`, {
-                params: { '$expand': 'relations', 'api-version': '7.0' }
-            });
-
-            const relations = response.data.relations || [];
+            const relations = await this.getRelations();
             const attachments: any[] = [];
 
             for (const relation of relations) {
@@ -727,7 +856,7 @@ export class WorkItemPanel {
         }
     }
 
-    private async getIterations(): Promise<IterationInfo[]> {
+    private async loadIterations(): Promise<IterationInfo[]> {
         try {
             const axiosInstance = this.authenticationManager.getAxiosInstance();
             const config = this.authenticationManager.getConfig();
@@ -740,9 +869,6 @@ export class WorkItemPanel {
                 { params: { 'api-version': '7.1' } }
             );
 
-            // Log the raw API response to see what we're getting
-            console.log('[WorkItemPanel] Raw iteration data from API:', JSON.stringify(response.data.value, null, 2));
-
             const iterations: IterationInfo[] = (response.data.value || []).map((iter: any) => ({
                 id: iter.id,
                 name: iter.name,
@@ -751,16 +877,14 @@ export class WorkItemPanel {
                 finishDate: iter.attributes?.finishDate
             }));
 
-            console.log('[WorkItemPanel] Loaded', iterations.length, 'team iterations');
-            console.log('[WorkItemPanel] Iteration paths:', iterations.map(i => i.path));
             return iterations;
         } catch (error) {
             console.error('Failed to load iterations:', error);
-            return [];
+            throw error;
         }
     }
 
-    private async getAreas(): Promise<AreaInfo[]> {
+    private async loadAreas(): Promise<AreaInfo[]> {
         try {
             const axiosInstance = this.authenticationManager.getAxiosInstance();
             const config = this.authenticationManager.getConfig();
@@ -792,15 +916,14 @@ export class WorkItemPanel {
                 }
             });
 
-            console.log('[WorkItemPanel] Loaded', areas.length, 'team areas');
             return areas;
         } catch (error) {
             console.error('Failed to load areas:', error);
-            return [];
+            throw error;
         }
     }
 
-    private async getTeamMembers(): Promise<TeamMemberInfo[]> {
+    private async loadTeamMembers(): Promise<TeamMemberInfo[]> {
         try {
             const axiosInstance = this.authenticationManager.getAxiosInstance();
             const config = this.authenticationManager.getConfig();
@@ -842,27 +965,29 @@ export class WorkItemPanel {
 
                 // Get members from all teams in the project
                 const teams = identitiesResponse.data.value || [];
-                for (const team of teams.slice(0, 5)) { // Limit to first 5 teams to avoid too many requests
+                // Limit to the first 5 teams to avoid too many requests, and load them together
+                const teamMemberLists = await Promise.all(teams.slice(0, 5).map(async (team: any) => {
                     try {
                         const teamMembersResponse = await axiosInstance.get(
-                            `/_apis/projects/${encodeURIComponent(config.defaultProject)}/teams/${encodeURIComponent(team.id)}/members`,
+                            `/_apis/projects/${encodeURIComponent(config.defaultProject ?? '')}/teams/${encodeURIComponent(team.id)}/members`,
                             { params: { 'api-version': '7.0' } }
                         );
-
-                        const additionalMembers = (teamMembersResponse.data.value || []).map((member: any) => ({
+                        return (teamMembersResponse.data.value || []).map((member: any) => ({
                             id: member.identity?.id || '',
                             displayName: member.identity?.displayName || '',
                             uniqueName: member.identity?.uniqueName || ''
-                        })).filter((m: TeamMemberInfo) => m.displayName && m.uniqueName);
-
-                        // Add unique members
-                        additionalMembers.forEach((newMember: TeamMemberInfo) => {
-                            if (!members.find(m => m.uniqueName === newMember.uniqueName)) {
-                                members.push(newMember);
-                            }
-                        });
+                        })).filter((m: TeamMemberInfo) => m.displayName && m.uniqueName) as TeamMemberInfo[];
                     } catch (e) {
-                        // Skip this team if error
+                        return [] as TeamMemberInfo[]; // Skip this team if error
+                    }
+                }));
+
+                // Add unique members
+                const known = new Set(members.map(m => m.uniqueName));
+                for (const newMember of teamMemberLists.flat()) {
+                    if (!known.has(newMember.uniqueName)) {
+                        known.add(newMember.uniqueName);
+                        members.push(newMember);
                     }
                 }
             } catch (projectError) {
@@ -878,7 +1003,7 @@ export class WorkItemPanel {
             return filteredMembers.sort((a, b) => a.displayName.localeCompare(b.displayName));
         } catch (error) {
             console.error('Failed to get team members:', error);
-            return [];
+            throw error;
         }
     }
 
@@ -915,13 +1040,12 @@ export class WorkItemPanel {
             const wiqlResponse = await axiosInstance.post(
                 `/${encodeURIComponent(config.defaultProject)}/_apis/wit/wiql`,
                 { query: wiql },
-                { params: { 'api-version': '7.1' } }
+                { params: { 'api-version': '7.1', '$top': 200 } }
             );
 
             const workItemRefs = wiqlResponse.data.workItems || [];
 
             if (workItemRefs.length === 0) {
-                console.log('No work items found, showing all team members');
                 return members;
             }
 
@@ -956,12 +1080,27 @@ export class WorkItemPanel {
         }
     }
 
-    private async getExistingTags(): Promise<string[]> {
+    private async loadExistingTags(): Promise<string[]> {
         try {
             const axiosInstance = this.authenticationManager.getAxiosInstance();
             const config = this.authenticationManager.getConfig();
 
             if (!axiosInstance || !config?.defaultProject) return [];
+
+            // The tags API lists every tag in the project in one call.
+            try {
+                const tagsResponse = await axiosInstance.get(
+                    `/${encodeURIComponent(config.defaultProject)}/_apis/wit/tags`,
+                    { params: { 'api-version': '7.1-preview.1' } }
+                );
+                const names: string[] = (tagsResponse.data?.value || [])
+                    .map((tag: any) => String(tag?.name ?? '').trim())
+                    .filter((name: string) => name);
+                return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
+            } catch (tagsError) {
+                // Older Azure DevOps Server versions lack the tags API; fall back to recent work items.
+                console.warn('[WorkItemPanel] Tags API unavailable, reading tags from recent work items:', (tagsError as any)?.message || tagsError);
+            }
 
             const wiql = `SELECT [System.Id], [System.Tags] FROM WorkItems WHERE [System.TeamProject] = @project ORDER BY [System.ChangedDate] DESC`;
 
@@ -993,20 +1132,17 @@ export class WorkItemPanel {
             return Array.from(tagSet).sort();
         } catch (error) {
             console.error('Failed to load existing tags:', error);
-            return [];
+            throw error;
         }
     }
 
-    private async getAvailableStates(): Promise<string[]> {
-        if (!this._workItem) return [];
+    private async loadAvailableStates(workItemType: string): Promise<string[]> {
 
         try {
             const axiosInstance = this.authenticationManager.getAxiosInstance();
             const config = this.authenticationManager.getConfig();
 
             if (!axiosInstance || !config?.defaultProject) return [];
-
-            const workItemType = this._workItem.fields['System.WorkItemType'];
 
             // Fetch work item type definition to get allowed states
             const response = await axiosInstance.get(
@@ -1027,8 +1163,7 @@ export class WorkItemPanel {
             return states.length > 0 ? states : ['New', 'Active', 'Resolved', 'Closed'];
         } catch (error) {
             console.error('Failed to load available states:', error);
-            // Fallback to common states if API call fails
-            return ['New', 'Active', 'Resolved', 'Closed'];
+            throw error;
         }
     }
 
@@ -3192,6 +3327,10 @@ export class WorkItemPanel {
     }
 
     public dispose() {
+        this._disposed = true;
+        if (this._workItem && WorkItemPanel.openPanels.get(this._workItem.id) === this) {
+            WorkItemPanel.openPanels.delete(this._workItem.id);
+        }
         // Unsubscribe from events
         if (this.eventSubscription) {
             this.eventSubscription.dispose();
