@@ -4,6 +4,7 @@ import { AuthenticationManager } from '../authentication/authenticationManager';
 import { LIST_FIELDS } from '../utils/workItemBatches';
 import { azureDevOps } from '../services/azureDevOpsService';
 import { applyLoadError, describeLoadError } from './loadErrors';
+import { decorateWorkItemRow } from './workItemTreeItems';
 
 export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<SprintTreeItem | undefined | void> = new vscode.EventEmitter<SprintTreeItem | undefined | void>();
@@ -202,8 +203,7 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
             // Show sprint sections
             return [
                 this.createSectionItem('Work Items', 'sprintWorkItems', element.sprintId!, 'tasklist'),
-                this.createSectionItem('Capacity', 'sprintCapacity', element.sprintId!, 'person'),
-                this.createSectionItem('Open in Browser', 'sprintOpen', element.sprintId!, 'link-external', element.sprintPath)
+                this.createSectionItem('Capacity', 'sprintCapacity', element.sprintId!, 'person')
             ];
         } else if (element.contextValue === 'sprintWorkItems') {
             // Show work items grouped by type
@@ -251,21 +251,10 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
             );
 
             return itemsOfType.map((item: any) => {
-                const title = item.fields['System.Title'];
-                const state = item.fields['System.State'];
                 const assignedTo = item.fields['System.AssignedTo']?.displayName || 'Unassigned';
-
-                const treeItem = new SprintTreeItem(
-                    `#${item.id}: ${title}`,
-                    vscode.TreeItemCollapsibleState.None,
-                    {
-                        command: 'azureDevOps.viewWorkItemDetails',
-                        title: 'View Work Item Details',
-                        arguments: [item.id]
-                    }
-                );
-                treeItem.description = `${state} • ${assignedTo}`;
-                treeItem.contextValue = 'workItem';
+                const treeItem = decorateWorkItemRow(new SprintTreeItem('', vscode.TreeItemCollapsibleState.None), item, {
+                    description: `${item.fields['System.State']} • ${assignedTo}`
+                });
                 treeItem.workItemId = item.id;
                 return treeItem;
             });
@@ -291,29 +280,13 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
                 treeItem.contextValue = 'capacityMember';
                 return treeItem;
             });
-        } else if (element.contextValue === 'sprintOpen') {
-            // This should open in browser, not show children
-            if (config) {
-                const sprintUrl = `${config.organizationUrl}/${encodeURIComponent(config.defaultProject)}/_sprints/taskboard/${encodeURIComponent(config.defaultTeam)}/${encodeURIComponent(element.sprintPath || '')}`;
-                vscode.env.openExternal(vscode.Uri.parse(sprintUrl));
-            }
-            return [];
         }
 
         return [];
     }
 
     private createSectionItem(label: string, contextValue: string, sprintId: string, icon: string, sprintPath?: string): SprintTreeItem {
-        const isOpenAction = contextValue === 'sprintOpen';
-        const treeItem = new SprintTreeItem(
-            label,
-            isOpenAction ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed,
-            isOpenAction ? {
-                command: 'azureDevOps.openSprint',
-                title: 'Open Sprint in Browser',
-                arguments: [{ sprintPath: sprintPath }]
-            } : undefined
-        );
+        const treeItem = new SprintTreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
         treeItem.contextValue = contextValue;
         treeItem.iconPath = new vscode.ThemeIcon(icon);
         treeItem.sprintId = sprintId;

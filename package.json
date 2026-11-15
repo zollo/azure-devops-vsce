@@ -453,6 +453,16 @@
       "view/item/context": [
         {
           "command": "azureDevOps.openWorkItem",
+          "when": "view =~ /^azureDevOps(WorkItems|Sprints|Queries|Backlogs)$/ && viewItem == workItem",
+          "group": "inline"
+        },
+        {
+          "command": "azureDevOps.openSprint",
+          "when": "view == azureDevOpsSprints && viewItem == sprint",
+          "group": "inline"
+        },
+        {
+          "command": "azureDevOps.openWorkItem",
           "when": "view == azureDevOpsWorkItems && viewItem == workItem",
           "group": "navigation@1"
         },

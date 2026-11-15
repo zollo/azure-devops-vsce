@@ -76,6 +76,18 @@ const vscodeStub = {
     },
     Uri: {
         joinPath: (base: { path: string }, ...segments: string[]) => ({ path: [base.path, ...segments].join('/') })
+    },
+    TreeItem: class {
+        [key: string]: unknown;
+        constructor(public label: unknown, public collapsibleState?: number) {}
+    },
+    TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
+    ThemeIcon: class { constructor(public id: string, public color?: unknown) {} },
+    ThemeColor: class { constructor(public id: string) {} },
+    MarkdownString: class {
+        value = '';
+        appendMarkdown(text: string) { this.value += text; return this; }
+        appendText(text: string) { this.value += text.replace(/[\\`*_{}[\]()#+\-.!<>|]/g, '\\$&'); return this; }
     }
 };
 
