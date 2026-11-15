@@ -413,6 +413,11 @@ export class BoardPanel {
                     outputChannel.appendLine('[Board] No changes since the last refresh');
                     return;
                 }
+                // The person may have started dragging or editing while the data loaded
+                if (!fullRefresh && this._uiBusy && this._lastBoardHtml !== undefined) {
+                    this._refreshPendingWhileBusy = true;
+                    return;
+                }
                 this._lastBoardHtml = html;
                 this._panel.webview.html = html;
 
@@ -1542,12 +1547,9 @@ export class BoardPanel {
                 changes: [{ field: '/fields/System.AssignedTo', newValue: currentUser.uniqueName }]
             });
 
-            // Send update to webview to update assignee avatar
-            this._panel.webview.postMessage({
-                command: 'updateAssignee',
-                workItemId,
-                assignee: currentUser
-            });
+            // The page has no in-place update for this, and the card may change column:
+            // reload the board (it keeps scroll, filters and collapsed columns)
+            await this._loadAndRender();
 
             notifySuccess(`Assigned #${workItemId} to you`);
 
@@ -1603,12 +1605,9 @@ export class BoardPanel {
                 changes: [{ field: '/fields/System.State', newValue: newState }]
             });
 
-            // Send update to webview to update state badge
-            this._panel.webview.postMessage({
-                command: 'updateState',
-                workItemId,
-                state: newState
-            });
+            // The page has no in-place update for this, and the card may change column:
+            // reload the board (it keeps scroll, filters and collapsed columns)
+            await this._loadAndRender();
 
             notifySuccess(`Changed #${workItemId} state to ${newState}`);
 
@@ -1757,15 +1756,9 @@ export class BoardPanel {
                 changes: [{ field: '/fields/System.AssignedTo', newValue: selected.uniqueName }]
             });
 
-            // Send update to webview to update assignee avatar
-            this._panel.webview.postMessage({
-                command: 'updateAssignee',
-                workItemId,
-                assignee: selected.uniqueName ? {
-                    uniqueName: selected.uniqueName,
-                    displayName: selected.label
-                } : null
-            });
+            // The page has no in-place update for this, and the card may change column:
+            // reload the board (it keeps scroll, filters and collapsed columns)
+            await this._loadAndRender();
 
             notifySuccess(`Updated assignee for #${workItemId}`);
 
@@ -5903,7 +5896,7 @@ export class BoardPanel {
 
             function isBusy() {
                 if (draggedCard || keyboardMoveMode) return true;
-                if (document.querySelector('.context-menu.show, .board-dropdown.show, .filter-dropdown-content.show')) return true;
+                if (document.querySelector('.context-menu.show, .card-menu.show, .board-dropdown.show, .filter-dropdown-content.show')) return true;
                 const active = document.activeElement;
                 if (active && active.id !== 'searchInput'
                     && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT' || active.isContentEditable)) {
@@ -5912,7 +5905,9 @@ export class BoardPanel {
                 return false;
             }
 
-            let lastBusy = false;
+            // Unset at first, so a new page always reports its state; a page that replaced a busy
+            // one would otherwise leave automatic refreshes waiting.
+            let lastBusy = null;
             setInterval(function () {
                 const busy = isBusy();
                 if (busy !== lastBusy) {

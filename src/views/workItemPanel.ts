@@ -57,8 +57,9 @@ export class WorkItemPanel {
 
         const existing = WorkItemPanel.openPanels.get(workItem.id);
         if (existing) {
+            // Just bring it forward: rebuilding the page would lose a comment being written.
+            // The tab already refreshes itself when the item changes in another view.
             existing._panel.reveal(existing._panel.viewColumn);
-            existing.update(workItem);
             return;
         }
 

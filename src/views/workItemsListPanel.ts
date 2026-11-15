@@ -1614,6 +1614,7 @@ export class WorkItemsListPanel {
                     bindRow(fresh);
                 });
                 applyAvatarColors();
+                syncFilterOptions();
                 applyFilters();
             }
 
@@ -1624,7 +1625,53 @@ export class WorkItemsListPanel {
                     if (row) row.remove();
                 });
                 updateBulkActionsVisibility();
+                syncFilterOptions();
                 applyFilters();
+            }
+
+            // Keep each filter's options in step with the rows: add values that appeared after an
+            // edit, and drop unchecked values no row has any more. Checked values always stay.
+            function syncFilterOptions() {
+                const rows = Array.from(document.querySelectorAll('#workItemsTable tbody tr'));
+                const valuesOf = {
+                    type: row => [row.dataset.type || ''],
+                    state: row => [row.dataset.state || ''],
+                    assignee: row => [row.dataset.assignee || ''],
+                    area: row => [row.dataset.area || ''],
+                    tags: row => (row.dataset.tags || '').split(';').map(t => t.trim())
+                };
+                Object.keys(valuesOf).forEach(name => {
+                    const container = document.getElementById(name + 'DropdownContent');
+                    if (!container) return;
+                    const present = new Set();
+                    rows.forEach(row => valuesOf[name](row).forEach(v => { if (v) present.add(v); }));
+                    const existing = new Map();
+                    container.querySelectorAll('input[type="checkbox"][name="' + name + '"]').forEach(cb => {
+                        existing.set(cb.value, cb);
+                    });
+                    existing.forEach((cb, value) => {
+                        if (!present.has(value) && !cb.checked) {
+                            const label = cb.closest('label');
+                            if (label) label.remove();
+                        }
+                    });
+                    const divider = container.querySelector('.filter-divider');
+                    Array.from(present).sort((a, b) => a.localeCompare(b)).forEach(value => {
+                        if (existing.has(value)) return;
+                        const label = document.createElement('label');
+                        label.className = 'filter-checkbox-item';
+                        const cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.name = name;
+                        cb.value = value;
+                        cb.addEventListener('change', function() {
+                            handleFilterChange(name, this);
+                        });
+                        label.appendChild(cb);
+                        label.appendChild(document.createTextNode(' ' + value));
+                        container.insertBefore(label, divider);
+                    });
+                });
             }
 
             // Filters are kept in the webview state, so they survive a refresh or reload of the page
