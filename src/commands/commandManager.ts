@@ -612,6 +612,7 @@ export function registerCommands(context: vscode.ExtensionContext, components: E
 
     context.subscriptions.push(
         vscode.commands.registerCommand('azureDevOps.refreshSprints', () => {
+            sharedMetadataCache.invalidate(); // re-read iterations, so new sprints show up
             components.sprintProvider.refresh();
         })
     );

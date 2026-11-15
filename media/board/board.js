@@ -70,7 +70,9 @@ function applyAvatarColors() {
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
-    document.addEventListener('keydown', handleGlobalKeydown);
+    // The same listener as below, so it is registered once; adding handleGlobalKeydown here
+    // made shortcuts run twice
+    document.addEventListener('keydown', handleGlobalKeydownWithFilter);
     document.addEventListener('click', hideContextMenu);
     applyAvatarColors();
 });
@@ -306,33 +308,35 @@ function hideContextMenu() {
 }
 
 function contextMenuAction(action, value) {
+    // Read the id before hiding the menu, which clears it
+    const workItemId = contextMenuWorkItemId;
     hideContextMenu();
-    if (!contextMenuWorkItemId) return;
+    if (!workItemId) return;
 
     switch (action) {
         case 'open':
-            vscode.postMessage({ command: 'openWorkItem', workItemId: contextMenuWorkItemId });
+            vscode.postMessage({ command: 'openWorkItem', workItemId: workItemId });
             break;
         case 'openBrowser':
-            vscode.postMessage({ command: 'openWorkItemInBrowser', workItemId: contextMenuWorkItemId });
+            vscode.postMessage({ command: 'openWorkItemInBrowser', workItemId: workItemId });
             break;
         case 'assignToMe':
-            vscode.postMessage({ command: 'assignToMe', workItemId: contextMenuWorkItemId });
+            vscode.postMessage({ command: 'assignToMe', workItemId: workItemId });
             break;
         case 'changeState':
-            vscode.postMessage({ command: 'changeState', workItemId: contextMenuWorkItemId, state: value });
+            vscode.postMessage({ command: 'changeState', workItemId: workItemId, state: value });
             break;
         case 'addComment':
-            vscode.postMessage({ command: 'addComment', workItemId: contextMenuWorkItemId });
+            vscode.postMessage({ command: 'addComment', workItemId: workItemId });
             break;
         case 'createBranch':
-            vscode.postMessage({ command: 'createBranch', workItemId: contextMenuWorkItemId });
+            vscode.postMessage({ command: 'createBranch', workItemId: workItemId });
             break;
         case 'copyId':
-            vscode.postMessage({ command: 'copyId', workItemId: contextMenuWorkItemId });
+            vscode.postMessage({ command: 'copyId', workItemId: workItemId });
             break;
         case 'copyUrl':
-            vscode.postMessage({ command: 'copyUrl', workItemId: contextMenuWorkItemId });
+            vscode.postMessage({ command: 'copyUrl', workItemId: workItemId });
             break;
     }
 }

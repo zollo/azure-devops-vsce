@@ -9,6 +9,7 @@ import { WorkItemEventManager } from '../events/workItemEventManager';
 import { OrganizationManager } from '../authentication/organizationManager';
 import { outputChannel } from '../extension';
 import { azureDevOps } from '../services/azureDevOpsService';
+import { sharedMetadataCache } from '../utils/metadataCache';
 
 /** Stands in for the script nonce while comparing renders; replaced before the HTML is shown. */
 const NONCE_PLACEHOLDER = '__BOARD_NONCE__';
@@ -188,6 +189,8 @@ export class BoardPanel {
                         vscode.commands.executeCommand('azureDevOps.viewWorkItemDetails', message.workItemId);
                         break;
                     case 'refresh':
+                        // The person asked for it: re-read team iterations, areas and members too
+                        sharedMetadataCache.invalidate();
                         await this._loadAndRender(true); // Full refresh when user clicks refresh button
                         break;
                     case 'openInBrowser':
@@ -2298,7 +2301,7 @@ export class BoardPanel {
                    id="searchInput"
                    placeholder="Search by ID or title..."
                    data-input="applyFilters"
-                   data-keydown="handleSearchKeydown" data-keydown-args='["$event", "$el"]'>
+                   data-keydown="handleSearchKeydown" data-keydown-args='[{"$ref": "event"}, {"$ref": "el"}]'>
             <button class="filter-search-clear" data-click="clearSearch">×</button>
         </div>
 
@@ -2307,12 +2310,12 @@ export class BoardPanel {
         <div class="filter-dropdown" id="assigneeDropdown">
             <button class="filter-dropdown-btn" id="assigneeDropdownBtn" data-click="toggleDropdown" data-click-args='["assigneeDropdownContent"]'>Assigned to</button>
             <div class="filter-dropdown-content" id="assigneeDropdownContent">
-                <label class="filter-checkbox-item"><input type="checkbox" name="assignee" value="me" data-change="handleFilterChange" data-change-args='["assignee", "$el"]'> @Me</label>
-                <label class="filter-checkbox-item"><input type="checkbox" name="assignee" value="unassigned" data-change="handleFilterChange" data-change-args='["assignee", "$el"]'> Unassigned</label>
+                <label class="filter-checkbox-item"><input type="checkbox" name="assignee" value="me" data-change="handleFilterChange" data-change-args='["assignee", {"$ref": "el"}]'> @Me</label>
+                <label class="filter-checkbox-item"><input type="checkbox" name="assignee" value="unassigned" data-change="handleFilterChange" data-change-args='["assignee", {"$ref": "el"}]'> Unassigned</label>
                 <div class="filter-divider" style="margin: 4px 0; height: 1px; width: 100%;"></div>
                 ${teamMembersWithWorkItems.map(m => `
                     <label class="filter-checkbox-item">
-                        <input type="checkbox" name="assignee" value="${this._escapeHtml(m.uniqueName)}" data-change="handleFilterChange" data-change-args='["assignee", "$el"]'>
+                        <input type="checkbox" name="assignee" value="${this._escapeHtml(m.uniqueName)}" data-change="handleFilterChange" data-change-args='["assignee", {"$ref": "el"}]'>
                         ${this._escapeHtml(m.displayName)}
                     </label>
                 `).join('')}
@@ -2326,7 +2329,7 @@ export class BoardPanel {
             <div class="filter-dropdown-content" id="typeDropdownContent">
                 ${boardTypes.map(type => `
                     <label class="filter-checkbox-item">
-                        <input type="checkbox" name="type" value="${this._escapeHtml(type)}" data-change="handleFilterChange" data-change-args='["type", "$el"]'>
+                        <input type="checkbox" name="type" value="${this._escapeHtml(type)}" data-change="handleFilterChange" data-change-args='["type", {"$ref": "el"}]'>
                         ${this._escapeHtml(type)}
                     </label>
                 `).join('')}
@@ -2340,7 +2343,7 @@ export class BoardPanel {
             <div class="filter-dropdown-content" id="priorityDropdownContent">
                 ${boardPriorities.map(priority => `
                     <label class="filter-checkbox-item">
-                        <input type="checkbox" name="priority" value="${priority}" data-change="handleFilterChange" data-change-args='["priority", "$el"]'>
+                        <input type="checkbox" name="priority" value="${priority}" data-change="handleFilterChange" data-change-args='["priority", {"$ref": "el"}]'>
                         ${priorityLabels[priority] || priority}
                     </label>
                 `).join('')}
@@ -2354,7 +2357,7 @@ export class BoardPanel {
             <div class="filter-dropdown-content" id="stateDropdownContent">
                 ${boardStates.map(state => `
                     <label class="filter-checkbox-item">
-                        <input type="checkbox" name="state" value="${this._escapeHtml(state)}" data-change="handleFilterChange" data-change-args='["state", "$el"]'>
+                        <input type="checkbox" name="state" value="${this._escapeHtml(state)}" data-change="handleFilterChange" data-change-args='["state", {"$ref": "el"}]'>
                         ${this._escapeHtml(state)}
                     </label>
                 `).join('')}
@@ -2368,7 +2371,7 @@ export class BoardPanel {
             <div class="filter-dropdown-content" id="areaDropdownContent">
                 ${boardAreas.map(area => `
                     <label class="filter-checkbox-item">
-                        <input type="checkbox" name="area" value="${this._escapeHtml(area)}" data-change="handleFilterChange" data-change-args='["area", "$el"]'>
+                        <input type="checkbox" name="area" value="${this._escapeHtml(area)}" data-change="handleFilterChange" data-change-args='["area", {"$ref": "el"}]'>
                         ${this._escapeHtml(area.split('\\').pop() || area)}
                     </label>
                 `).join('')}
@@ -2380,7 +2383,7 @@ export class BoardPanel {
         <div class="filter-dropdown" id="iterationDropdown" style="flex-shrink: 0;">
             <button class="filter-dropdown-btn" id="iterationDropdownBtn" data-click="toggleDropdown" data-click-args='["iterationDropdownContent"]' style="min-width: 100px;">Iteration</button>
             <div class="filter-dropdown-content" id="iterationDropdownContent">
-                <label class="filter-checkbox-item"><input type="checkbox" name="iteration" value="@currentiteration" data-change="handleFilterChange" data-change-args='["iteration", "$el"]'> @CurrentIteration</label>
+                <label class="filter-checkbox-item"><input type="checkbox" name="iteration" value="@currentiteration" data-change="handleFilterChange" data-change-args='["iteration", {"$ref": "el"}]'> @CurrentIteration</label>
                 <div class="filter-divider" style="margin: 4px 0; height: 1px; width: 100%;"></div>
                 ${boardIterations.length > 0 ? boardIterations.map(iteration => {
                     // Remove organization and team prefix (first 2 segments)
@@ -2389,7 +2392,7 @@ export class BoardPanel {
                     const displayName = parts.length > 2 ? parts.slice(2).join('\\') : iteration;
                     return `
                     <label class="filter-checkbox-item">
-                        <input type="checkbox" name="iteration" value="${this._escapeHtml(iteration)}" data-change="handleFilterChange" data-change-args='["iteration", "$el"]'>
+                        <input type="checkbox" name="iteration" value="${this._escapeHtml(iteration)}" data-change="handleFilterChange" data-change-args='["iteration", {"$ref": "el"}]'>
                         ${this._escapeHtml(displayName)}
                     </label>
                     `;
@@ -2430,12 +2433,12 @@ export class BoardPanel {
                  data-limit="${column.itemLimit}"
                  data-index="${colIndex}"
                  tabindex="0"
-                 data-dragover="handleDragOver" data-dragover-args='["$event"]'
-                 data-dragleave="handleDragLeave" data-dragleave-args='["$event"]'
-                 data-drop="handleDrop" data-drop-args='["$event"]'>
-                <div class="column-header" data-click="toggleColumn" data-click-args='["$parent"]'>
+                 data-dragover="handleDragOver" data-dragover-args='[{"$ref": "event"}]'
+                 data-dragleave="handleDragLeave" data-dragleave-args='[{"$ref": "event"}]'
+                 data-drop="handleDrop" data-drop-args='[{"$ref": "event"}]'>
+                <div class="column-header" data-click="toggleColumn" data-click-args='[{"$ref": "parent"}]'>
                     <div class="column-header-left">
-                        <button class="collapse-btn" data-click="toggleColumn" data-click-args='["$column"]' data-stop>◀</button>
+                        <button class="collapse-btn" data-click="toggleColumn" data-click-args='[{"$ref": "column"}]' data-stop>◀</button>
                         <span class="column-title">${this._escapeHtml(column.name)}</span>
                     </div>
                     <div class="column-header-right">
@@ -2454,7 +2457,7 @@ export class BoardPanel {
                 <div class="add-item-form-container" id="add-form-${this._escapeHtml(column.name).replace(/\s/g, '-')}">
                     <div class="add-item-row">
                         <div class="add-item-type-dropdown" id="add-item-type-dropdown">
-                            <button class="add-item-type-btn" id="add-item-type-btn" data-click="toggleTypeDropdown" data-click-args='["$event"]' title="${this._escapeHtml(defaultWorkItemType)}">
+                            <button class="add-item-type-btn" id="add-item-type-btn" data-click="toggleTypeDropdown" data-click-args='[{"$ref": "event"}]' title="${this._escapeHtml(defaultWorkItemType)}">
                                 <span class="type-icon">${this._getTypeIcon(defaultWorkItemType)}</span>
                                 <svg class="dropdown-arrow" width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M4 6l4 4 4-4z"/></svg>
                             </button>
@@ -2468,7 +2471,7 @@ export class BoardPanel {
                         </div>
                         <input type="hidden" id="add-item-type-value" value="${this._escapeHtml(defaultWorkItemType)}" />
                         <input type="text" class="add-item-input" id="add-item-title-input" placeholder="Enter title..."
-                               data-keydown="handleAddKeydown" data-keydown-args='["$event", ${jsArg(column.name)}]' />
+                               data-keydown="handleAddKeydown" data-keydown-args='[{"$ref": "event"}, ${jsArg(column.name)}]' />
                         <button class="btn btn-primary add-item-submit" data-click="createItem" data-click-args='[${jsArg(column.name)}]'>Add to top</button>
                     </div>
                 </div>
@@ -2618,19 +2621,19 @@ export class BoardPanel {
              data-effort="${effort}"
              ${cardStyle}
              tabindex="0"
-             data-dragstart="handleDragStart" data-dragstart-args='["$event", ${item.id}]'
-             data-dragend="handleDragEnd" data-dragend-args='["$event"]'
+             data-dragstart="handleDragStart" data-dragstart-args='[{"$ref": "event"}, ${item.id}]'
+             data-dragend="handleDragEnd" data-dragend-args='[{"$ref": "event"}]'
              data-click="openWorkItem" data-click-args='[${item.id}]'
-             data-focus="selectCard" data-focus-args='["$el"]'>
+             data-focus="selectCard" data-focus-args='[{"$ref": "el"}]'>
             <div class="card-header">
                 <span class="card-type-icon" title="${this._escapeHtml(item.type)}">${typeIcon}</span>
                 <div class="card-header-content">
                     <div class="card-id-title">
                         <span class="card-id" data-click="openWorkItem" data-click-args='[${item.id}]' data-stop>${item.id}</span>
-                        <span class="card-title" data-dblclick="editCardTitle" data-dblclick-args='["$el", ${item.id}]' data-stop>${this._escapeHtml(item.title)}</span>
+                        <span class="card-title" data-dblclick="editCardTitle" data-dblclick-args='[{"$ref": "el"}, ${item.id}]' data-stop>${this._escapeHtml(item.title)}</span>
                     </div>
                 </div>
-                <button class="card-menu-btn" data-click="showCardMenu" data-click-args='["$event", ${item.id}]' data-stop title="More options">⋯</button>
+                <button class="card-menu-btn" data-click="showCardMenu" data-click-args='[{"$ref": "event"}, ${item.id}]' data-stop title="More options">⋯</button>
             </div>
             <div class="card-status">
                 <span class="status-dot ${stateClass}"></span>
@@ -2642,7 +2645,7 @@ export class BoardPanel {
             </div>
             ${item.effort ? `<div class="card-effort">
                 <span class="card-effort-label">Effort</span>
-                <span class="card-effort-value" data-click="editCardEffort" data-click-args='["$el", ${item.id}, ${item.effort}]' data-stop>${item.effort}</span>
+                <span class="card-effort-value" data-click="editCardEffort" data-click-args='[{"$ref": "el"}, ${item.id}, ${item.effort}]' data-stop>${item.effort}</span>
             </div>` : ''}
             ${tags ? `<div class="card-tags">${tags}</div>` : ''}
             ${this._renderChildIndicator(item)}
@@ -2718,7 +2721,7 @@ export class BoardPanel {
                                class="checklist-checkbox"
                                ${isDone ? 'checked' : ''}
                                data-child-id="${child.id}"
-                               data-click="toggleChildState" data-click-args='[${child.id}, ${item.id}, "$checked"]' data-stop
+                               data-click="toggleChildState" data-click-args='[${child.id}, ${item.id}, {"$ref": "checked"}]' data-stop
                                title="Mark as ${isDone ? 'not done' : 'done'}">
                         <span class="checklist-icon">${this._getChildTypeIcon(child.type)}</span>
                         <div class="checklist-avatar card-avatar ${!child.assignedTo ? 'unassigned' : ''}"

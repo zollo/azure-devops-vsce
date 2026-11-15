@@ -142,19 +142,28 @@ export class AzureDevOpsService {
         }
         return this.cache.getOrLoad(metadataKey('project-members', org, project, team, String(maxTeams)), METADATA_TTL_MS, async () => {
             const http = this.http();
+            let teamListError: unknown;
             const teamsResponse = await http.get(
                 `/_apis/projects/${encodeURIComponent(project)}/teams`,
                 { params: { 'api-version': '7.0', '$top': maxTeams } }
             ).catch(error => {
                 log.warn('[AzureDevOps] Could not list project teams:', error);
+                teamListError = error;
                 return { data: { value: [] } };
             });
             const teamIds: string[] = (teamsResponse.data?.value || []).slice(0, maxTeams).map((t: any) => String(t.id));
 
-            const lists = await Promise.all([
-                team ? this.getTeamMembers(team).catch(() => [] as TeamMember[]) : Promise.resolve([] as TeamMember[]),
-                ...teamIds.map(id => this.getTeamMembers(id).catch(() => [] as TeamMember[]))
-            ]);
+            // A team that can't be read is skipped, but if nothing could be read the load fails,
+            // so an outage isn't cached as an empty list
+            const sources = [...(team ? [team] : []), ...teamIds];
+            const results = await Promise.allSettled(sources.map(name => this.getTeamMembers(name)));
+            const lists = results.flatMap(result => (result.status === 'fulfilled' ? [result.value] : []));
+            if (lists.length === 0) {
+                const firstFailure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+                if (firstFailure || teamListError) {
+                    throw firstFailure ? firstFailure.reason : teamListError;
+                }
+            }
             const byName = new Map<string, TeamMember>();
             for (const member of lists.flat()) {
                 if (!byName.has(member.uniqueName)) {

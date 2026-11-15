@@ -1046,7 +1046,7 @@ export class WorkItemPanel {
             <span class="state-pill" data-click="scrollToState">${this.escapeHtml(state)}</span>
             <div class="quick-actions">
                 ${assignedTo === 'Unassigned' ? '<button class="btn-icon" data-click="assignToMe">Assign to me</button>' : ''}
-                <button class="btn-icon" data-click="toggleMenu" data-click-args='["$event"]'>⋯</button>
+                <button class="btn-icon" data-click="toggleMenu" data-click-args='[{"$ref": "event"}]'>⋯</button>
                 <div id="menuDropdown" class="menu-dropdown" style="display: none;">
                     <div class="menu-item" data-click="menuOpenInBrowser">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 8px;">
@@ -1158,7 +1158,7 @@ export class WorkItemPanel {
                                 return `<div class="iteration-dropdown-item ${isSelected ? 'selected' : ''}"
                                     data-path="${this.escapeHtml(iter.path)}"
                                     data-name="${this.escapeHtml(iter.name)}"
-                                    data-click="selectIterationFromData" data-click-args='["$el"]'>
+                                    data-click="selectIterationFromData" data-click-args='[{"$ref": "el"}]'>
                                     <span class="iteration-item-name">${this.escapeHtml(iter.name)}</span>
                                     ${dateRange ? `<span class="iteration-item-dates">${dateRange}</span>` : ''}
                                 </div>`;
@@ -1171,7 +1171,7 @@ export class WorkItemPanel {
                     <div class="tags-editor-container">
                         <div class="tags-display" id="tagsDisplay">
                             ${tags ? tags.split(';').map(t => `<span class="tag-chip-editable">${this.escapeHtml(t.trim())}<button class="tag-remove" data-click="removeTag" data-click-args='[${jsArg(t.trim())}]'>×</button></span>`).join('') : ''}
-                            <input type="text" class="tag-input" id="tagInput" placeholder="Add tag..." data-input="handleTagInput" data-keydown="handleTagKeydown" data-keydown-args='["$event"]' data-focus="showTagSuggestions" data-blur="hideTagSuggestions">
+                            <input type="text" class="tag-input" id="tagInput" placeholder="Add tag..." data-input="handleTagInput" data-keydown="handleTagKeydown" data-keydown-args='[{"$ref": "event"}]' data-focus="showTagSuggestions" data-blur="hideTagSuggestions">
                         </div>
                         <div class="tag-suggestions" id="tagSuggestions"></div>
                     </div>
@@ -1196,7 +1196,7 @@ export class WorkItemPanel {
                                 return `<div class="area-dropdown-item ${isSelected ? 'selected' : ''}"
                                     data-path="${this.escapeHtml(area.path)}"
                                     data-name="${this.escapeHtml(area.name)}"
-                                    data-click="selectAreaFromData" data-click-args='["$el"]'>
+                                    data-click="selectAreaFromData" data-click-args='[{"$ref": "el"}]'>
                                     ${this.escapeHtml(area.name)}
                                 </div>`;
                             }).join('')}

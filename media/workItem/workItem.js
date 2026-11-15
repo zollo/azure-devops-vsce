@@ -689,7 +689,7 @@ function renderTags() {
 
     display.innerHTML = currentTags.map(tag =>
         `<span class="tag-chip-editable">${escapeHtml(tag)}<button class="tag-remove" data-click="removeTag" data-click-args='[${jsArg(tag)}]'>×</button></span>`
-    ).join('') + `<input type="text" class="tag-input" id="tagInput" placeholder="Add tag..." data-input="handleTagInput" data-keydown="handleTagKeydown" data-keydown-args='["$event"]' data-focus="showTagSuggestions" data-blur="hideTagSuggestions">`;
+    ).join('') + `<input type="text" class="tag-input" id="tagInput" placeholder="Add tag..." data-input="handleTagInput" data-keydown="handleTagKeydown" data-keydown-args='[{"$ref": "event"}]' data-focus="showTagSuggestions" data-blur="hideTagSuggestions">`;
 
     // Connect the new elements now, before focusing, rather than when the page notices them
     bindWebviewHandlers(display);

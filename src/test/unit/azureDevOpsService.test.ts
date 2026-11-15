@@ -195,3 +195,16 @@ test('not being connected is an error, not an empty result', async () => {
     const svc = new AzureDevOpsService(connection, new MetadataCache());
     await assert.rejects(svc.getTeamMembers(), /Not connected/);
 });
+
+test('project members fail, and are not cached, when no team can be read', async () => {
+    let down = true;
+    const { svc } = service(url => {
+        if (down) {
+            throw new Error('offline');
+        }
+        return url.endsWith('/teams') ? { value: [] } : { value: [member('Adam', 'adam@x')] };
+    });
+    await assert.rejects(svc.getProjectMembers(), /offline/);
+    down = false;
+    assert.equal((await svc.getProjectMembers()).length, 1);
+});

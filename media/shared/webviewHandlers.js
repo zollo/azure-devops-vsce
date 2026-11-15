@@ -2,13 +2,14 @@
 // event handlers and can run under a nonce-only Content-Security-Policy.
 //
 //   <button data-click="openWorkItem" data-click-args="[42]">       -> openWorkItem(42)
-//   <input data-change="handleFilterChange" data-change-args='["state", "$el"]'>
-//   <div data-click="toggleColumn" data-click-args='["$parent"]' data-stop>
+//   <input data-change="handleFilterChange" data-change-args='["state", {"$ref": "el"}]'>
+//   <div data-click="toggleColumn" data-click-args='[{"$ref": "parent"}]' data-stop>
 //
 // data-<event> names a global function. data-<event>-args (or data-args, shared by every event
-// on the element) is a JSON array of its arguments; these strings stand for
-// values from the event: "$el" (the element), "$event", "$checked" (el.checked), "$parent"
-// (el.parentElement) and "$column" (the closest .column). data-stop stops the event from
+// on the element) is a JSON array of its arguments. Plain values are passed as they are, so
+// any string from Azure DevOps arrives unchanged; {"$ref": name} stands for a value from the
+// event: "el" (the element), "event", "checked" (el.checked), "value" (el.value), "parent"
+// (el.parentElement) or "column" (the closest .column). data-stop stops the event from
 // reaching outer elements, like event.stopPropagation() did in the inline handlers.
 //
 // Elements added later (menus, re-rendered cards) are connected as they appear.
@@ -45,14 +46,17 @@
     }
 
     function resolveArg(arg, el, event) {
-        switch (arg) {
-            case '$el': return el;
-            case '$event': return event;
-            case '$checked': return el.checked;
-            case '$value': return el.value;
-            case '$parent': return el.parentElement;
-            case '$column': return el.closest('.column');
-            default: return arg;
+        if (!arg || typeof arg !== 'object' || Array.isArray(arg) || typeof arg.$ref !== 'string') {
+            return arg;
+        }
+        switch (arg.$ref) {
+            case 'el': return el;
+            case 'event': return event;
+            case 'checked': return el.checked;
+            case 'value': return el.value;
+            case 'parent': return el.parentElement;
+            case 'column': return el.closest('.column');
+            default: return undefined;
         }
     }
 
