@@ -696,7 +696,14 @@ function toggleEffortEditor(button, workItemId) {
         newButton.className = 'card-effort-toggle';
         newButton.onclick = (e) => { e.stopPropagation(); toggleEffortEditor(newButton, workItemId); };
         newButton.title = 'Story Points';
-        newButton.innerHTML = `<span class="effort-icon">▲</span><span class="effort-value">${newEffort || 'Story Points'}</span>`;
+        // Built with textContent: the typed value is never parsed as HTML
+        const icon = document.createElement('span');
+        icon.className = 'effort-icon';
+        icon.textContent = '▲';
+        const value = document.createElement('span');
+        value.className = 'effort-value';
+        value.textContent = newEffort || 'Story Points';
+        newButton.replaceChildren(icon, value);
         input.replaceWith(newButton);
 
         card.dataset.effort = newEffort;
