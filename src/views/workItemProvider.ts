@@ -589,35 +589,31 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
     private async fetchStateCategoriesForType(workItemType: string): Promise<Map<string, string>> {
         const stateCategories = new Map<string, string>();
 
-        try {
-            const axiosInstance = this.authenticationManager.getAxiosInstance();
-            const config = this.authenticationManager.getConfig();
+        // Errors propagate so a failed lookup isn't cached; icons fall back to state names meanwhile
+        const axiosInstance = this.authenticationManager.getAxiosInstance();
+        const config = this.authenticationManager.getConfig();
 
-            if (!axiosInstance || !config?.defaultProject) {
-                return stateCategories;
-            }
+        if (!axiosInstance || !config?.defaultProject) {
+            return stateCategories;
+        }
 
-            const response = await axiosInstance.get(
-                `/${encodeURIComponent(config.defaultProject)}/_apis/wit/workitemtypes/${encodeURIComponent(workItemType)}/states`,
-                {
-                    params: {
-                        'api-version': '7.1'
-                    }
+        const response = await axiosInstance.get(
+            `/${encodeURIComponent(config.defaultProject)}/_apis/wit/workitemtypes/${encodeURIComponent(workItemType)}/states`,
+            {
+                params: {
+                    'api-version': '7.1'
                 }
-            );
-
-            if (response.data && response.data.value) {
-                response.data.value.forEach((stateInfo: any) => {
-                    if (stateInfo.name && stateInfo.category) {
-                        const stateName = stateInfo.name.toLowerCase();
-                        const category = stateInfo.category;
-                        stateCategories.set(stateName, category);
-                    }
-                });
             }
-        } catch (error) {
-            // Not cached, so the next load tries again; icons fall back to state names meanwhile
-            throw error;
+        );
+
+        if (response.data && response.data.value) {
+            response.data.value.forEach((stateInfo: any) => {
+                if (stateInfo.name && stateInfo.category) {
+                    const stateName = stateInfo.name.toLowerCase();
+                    const category = stateInfo.category;
+                    stateCategories.set(stateName, category);
+                }
+            });
         }
 
         return stateCategories;
