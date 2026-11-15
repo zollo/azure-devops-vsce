@@ -33,14 +33,22 @@ export class WorkItemProvider implements vscode.TreeDataProvider<WorkItemTreeIte
     private eventManager = WorkItemEventManager.getInstance();
     private stateCategoryCache: Map<string, string> = new Map(); // Maps "workItemType:state" -> "category"
     private loadError: unknown;
+    private eventRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 
     constructor(context: vscode.ExtensionContext, authenticationManager: AuthenticationManager) {
         this.context = context;
         this.authenticationManager = authenticationManager;
 
-        // Subscribe to work item update events from other views
+        // Subscribe to work item update events from other views. A bulk edit sends one event
+        // per item, so reload once after they stop arriving instead of once per item.
         this.eventManager.onWorkItemUpdated(() => {
-            this.forceRefresh();
+            if (this.eventRefreshTimer) {
+                clearTimeout(this.eventRefreshTimer);
+            }
+            this.eventRefreshTimer = setTimeout(() => {
+                this.eventRefreshTimer = undefined;
+                this.forceRefresh();
+            }, 300);
         });
     }
 
