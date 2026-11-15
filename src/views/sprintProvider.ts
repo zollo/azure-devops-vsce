@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { AuthenticationManager } from '../authentication/authenticationManager';
+import { fetchWorkItemsInBatches, LIST_FIELDS } from '../utils/workItemBatches';
 
 export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<SprintTreeItem | undefined | void> = new vscode.EventEmitter<SprintTreeItem | undefined | void>();
@@ -90,15 +91,24 @@ export class SprintProvider implements vscode.TreeDataProvider<SprintTreeItem> {
                 return [];
             }
 
-            const workItemIds = workItemRefs.map((item: any) => item.target.id).join(',');
-            const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
-                params: {
-                    'ids': workItemIds,
-                    '$expand': 'all'
-                }
-            });
-
-            const workItems = detailsResponse.data.value || [];
+            // The API takes at most 200 ids per request, so large sprints load in batches.
+            const workItemIds: number[] = workItemRefs
+                .map((item: any) => item.target?.id)
+                .filter((id: unknown): id is number => typeof id === 'number');
+            const workItems = await fetchWorkItemsInBatches<any>(
+                workItemIds,
+                async batch => {
+                    const detailsResponse = await axiosInstance.get('/_apis/wit/workitems', {
+                        params: {
+                            'ids': batch.join(','),
+                            'fields': LIST_FIELDS.join(','),
+                            'errorPolicy': 'omit'
+                        }
+                    });
+                    return (detailsResponse.data.value || []).filter((item: any) => item);
+                },
+                error => console.error('Failed to load a batch of sprint work items:', (error as any)?.message || error)
+            );
             this.sprintWorkItems.set(sprintId, workItems);
             return workItems;
         } catch (error: any) {
