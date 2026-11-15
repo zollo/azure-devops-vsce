@@ -972,7 +972,7 @@ export class WorkItemPanel {
 
     private _getHtmlForWebview(comments: any[] = [], linkedItems: any[] = [], attachments: any[] = [], currentUser: any = null): string {
         const quillCssUri = vendorAssetUri(this._panel.webview, this._extensionUri, 'quill', 'quill.snow.css');
-        const quillJsUri = vendorAssetUri(this._panel.webview, this._extensionUri, 'quill', 'quill.min.js');
+        const quillJsUri = vendorAssetUri(this._panel.webview, this._extensionUri, 'quill', 'quill.js');
         if (!this._workItem) return '<html><body><p>No work item loaded</p></body></html>';
 
         const fields = this._workItem.fields;

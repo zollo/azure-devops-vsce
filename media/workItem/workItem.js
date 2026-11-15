@@ -30,7 +30,7 @@ function showDescriptionEditor() {
 }
 
 function hideDescriptionEditor() {
-    const html = descriptionQuill.root.innerHTML;
+    const html = editorHtml(descriptionQuill);
     const text = descriptionQuill.getText().trim();
     const display = document.getElementById('descriptionDisplay');
     const container = document.getElementById('descriptionEditorContainer');
@@ -49,7 +49,7 @@ function hideDescriptionEditor() {
     // Only save if user actually edited the description
     if (descriptionDirty) {
         const title = document.getElementById('title').value;
-        const acceptanceCriteria = acceptanceCriteriaQuill ? acceptanceCriteriaQuill.root.innerHTML : '';
+        const acceptanceCriteria = acceptanceCriteriaQuill ? editorHtml(acceptanceCriteriaQuill) : '';
         vscode.postMessage({ command: 'save', data: { title, description: html, acceptanceCriteria } });
         descriptionDirty = false;
     }
@@ -80,7 +80,7 @@ function showAcceptanceCriteriaEditor() {
 }
 
 function hideAcceptanceCriteriaEditor() {
-    const html = acceptanceCriteriaQuill.root.innerHTML;
+    const html = editorHtml(acceptanceCriteriaQuill);
     const text = acceptanceCriteriaQuill.getText().trim();
     const display = document.getElementById('acceptanceCriteriaDisplay');
     const container = document.getElementById('acceptanceCriteriaEditorContainer');
@@ -99,7 +99,7 @@ function hideAcceptanceCriteriaEditor() {
     // Only save if user actually edited the acceptance criteria
     if (acceptanceCriteriaDirty) {
         const title = document.getElementById('title').value;
-        const description = descriptionQuill ? descriptionQuill.root.innerHTML : '';
+        const description = descriptionQuill ? editorHtml(descriptionQuill) : '';
         vscode.postMessage({ command: 'save', data: { title, description, acceptanceCriteria: html } });
         acceptanceCriteriaDirty = false;
     }
@@ -131,15 +131,15 @@ document.addEventListener('click', function() {
 
 function saveTitleOnBlur() {
     const title = document.getElementById('title').value;
-    const description = descriptionQuill ? descriptionQuill.root.innerHTML : '';
-    const acceptanceCriteria = acceptanceCriteriaQuill ? acceptanceCriteriaQuill.root.innerHTML : '';
+    const description = descriptionQuill ? editorHtml(descriptionQuill) : '';
+    const acceptanceCriteria = acceptanceCriteriaQuill ? editorHtml(acceptanceCriteriaQuill) : '';
     vscode.postMessage({ command: 'save', data: { title, description, acceptanceCriteria } });
 }
 
 function saveWorkItem() {
     const title = document.getElementById('title').value;
-    const description = descriptionQuill ? descriptionQuill.root.innerHTML : '';
-    const acceptanceCriteria = acceptanceCriteriaQuill ? acceptanceCriteriaQuill.root.innerHTML : '';
+    const description = descriptionQuill ? editorHtml(descriptionQuill) : '';
+    const acceptanceCriteria = acceptanceCriteriaQuill ? editorHtml(acceptanceCriteriaQuill) : '';
     vscode.postMessage({ command: 'save', data: { title, description, acceptanceCriteria } });
 }
 
@@ -148,6 +148,15 @@ function changeState(state) {
 }
 
 let quill;
+/**
+ * The editor's content as standard HTML for Azure DevOps. Quill 2's own markup (root.innerHTML)
+ * writes bullet lists as <ol data-list="bullet">, so use getSemanticHTML, which also turns every
+ * space into &nbsp; in 2.0.x; put those back so text still wraps.
+ */
+function editorHtml(editor) {
+    return editor.getSemanticHTML().replace(/&nbsp;/g, ' ');
+}
+
 let descriptionQuill;
 let acceptanceCriteriaQuill;
 let editQuills = {};
@@ -384,7 +393,7 @@ function saveEdit(commentId) {
     const editor = editQuills[commentId];
     if (!editor) return;
     
-    const html = editor.root.innerHTML;
+    const html = editorHtml(editor);
     const text = editor.getText().trim();
     
     if (text) {
@@ -406,7 +415,7 @@ function deleteComment(commentId) {
 
 function addComment() {
     if (!quill) return;
-    let html = quill.root.innerHTML;
+    let html = editorHtml(quill);
     const text = quill.getText().trim();
     
     // Remove base64 images (they cause 500 errors)
