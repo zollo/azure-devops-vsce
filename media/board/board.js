@@ -16,34 +16,23 @@ let selectedCard = null;
 let keyboardMoveMode = false;
 let contextMenuWorkItemId = null;
 
-// Avatar color utility - generates consistent colors based on display name
+// Avatar fills: white initials keep 4.5:1 on each. Same list as AVATAR_COLORS in
+// src/utils/stateColors.ts (a unit test checks they match).
+const AVATAR_COLORS = [
+    '#0078d4', '#8764b8', '#107c10', '#c4314b', '#a35200',
+    '#038387', '#5c2e91', '#b4009e', '#4f6bed', '#986f0b'
+];
+
+// Generates a consistent color from the display name
 function getAvatarColor(displayName) {
     if (!displayName || displayName === 'Unassigned') {
-        return { bg: 'rgba(139, 139, 139, 0.3)', fg: '#8b8b8b' };
+        return { bg: '#6e6e6e', fg: '#ffffff' };
     }
-
-    // Hash the display name to get a consistent number
     let hash = 0;
     for (let i = 0; i < displayName.length; i++) {
         hash = displayName.charCodeAt(i) + ((hash << 5) - hash);
     }
-
-    // Predefined pleasant color palette
-    const colors = [
-        { bg: 'rgba(34, 197, 94, 0.3)', fg: '#22c55e' },   // Green
-        { bg: 'rgba(59, 130, 246, 0.3)', fg: '#3b82f6' },  // Blue
-        { bg: 'rgba(168, 85, 247, 0.3)', fg: '#a855f7' },  // Purple
-        { bg: 'rgba(236, 72, 153, 0.3)', fg: '#ec4899' },  // Pink
-        { bg: 'rgba(251, 146, 60, 0.3)', fg: '#fb923c' },  // Orange
-        { bg: 'rgba(14, 165, 233, 0.3)', fg: '#0ea5e9' },  // Cyan
-        { bg: 'rgba(244, 63, 94, 0.3)', fg: '#f43f5e' },   // Red
-        { bg: 'rgba(234, 179, 8, 0.3)', fg: '#eab308' },   // Yellow
-        { bg: 'rgba(20, 184, 166, 0.3)', fg: '#14b8a6' },  // Teal
-        { bg: 'rgba(139, 92, 246, 0.3)', fg: '#8b5cf6' },  // Violet
-    ];
-
-    const index = Math.abs(hash) % colors.length;
-    return colors[index];
+    return { bg: AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length], fg: '#ffffff' };
 }
 
 // Apply avatar colors after DOM is loaded

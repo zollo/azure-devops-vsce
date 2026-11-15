@@ -9,6 +9,7 @@ import { WorkItemEventManager } from '../events/workItemEventManager';
 import { METADATA_TTL_MS, metadataKey, sharedMetadataCache } from '../utils/metadataCache';
 import { azureDevOps } from '../services/azureDevOpsService';
 import { isOrganizationUrl } from '../utils/workItemUrls';
+import { avatarColor, stateColor } from '../utils/stateColors';
 
 interface IterationInfo {
     id: string;
@@ -1007,16 +1008,6 @@ export class WorkItemPanel {
             ? this._availableStates
             : ['New', 'Active', 'Resolved', 'Closed'];
 
-        const getStateColor = (state: string) => {
-            const map: Record<string, string> = {
-                'New': '#0078d4', 'To Do': '#0078d4',
-                'Active': '#ffa500', 'In Progress': '#ffa500',
-                'Resolved': '#8b8b00',
-                'Done': '#107c10', 'Closed': '#107c10',
-                'Removed': '#d13438'
-            };
-            return map[state] || '#8b8b8b';
-        };
 
         // Styles and script live in media/workItem; data for the script goes in #work-item-data
         const nonce = getNonce();
@@ -1041,7 +1032,7 @@ export class WorkItemPanel {
     <title>#${this._workItem.id}</title>
     <link href="${quillCssUri}" rel="stylesheet">
     <link href="${workItemCssUri}" rel="stylesheet">
-    <style>:root { --state-color: ${safeCssColor(getStateColor(state), '#8b8b8b')}; }</style>
+    <style>:root { --state-color: ${safeCssColor(stateColor(state), '#6e6e6e')}; }</style>
     <script nonce="${nonce}" src="${quillJsUri}"></script>
 </head>
 <body>
@@ -1371,14 +1362,7 @@ export class WorkItemPanel {
 
 
     private getStateColorForLinked(state: string): string {
-        const map: Record<string, string> = {
-            'New': '#0078d4', 'To Do': '#0078d4',
-            'Active': '#ffa500', 'In Progress': '#ffa500',
-            'Resolved': '#8b8b00',
-            'Done': '#107c10', 'Closed': '#107c10',
-            'Removed': '#d13438'
-        };
-        return map[state] || '#8b8b8b';
+        return stateColor(state);
     }
 
     private getFileIcon(fileName: string): string {
@@ -1413,12 +1397,7 @@ export class WorkItemPanel {
     }
 
     private getAvatarColor(name: string): string {
-        const colors = ['#0078d4', '#8764b8', '#00b7c3', '#8cbd18', '#ffb900', '#d13438', '#00cc6a', '#e3008c'];
-        let hash = 0;
-        for (let i = 0; i < name.length; i++) {
-            hash = name.charCodeAt(i) + ((hash << 5) - hash);
-        }
-        return colors[Math.abs(hash) % colors.length];
+        return avatarColor(name);
     }
 
     public dispose() {

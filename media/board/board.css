@@ -79,7 +79,7 @@ body {
     background: var(--vscode-dropdown-background);
     border: 1px solid var(--vscode-dropdown-border);
     border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
     z-index: 200;
     margin-top: 4px;
 }
@@ -409,7 +409,7 @@ body {
     background: var(--vscode-dropdown-background);
     border: 1px solid var(--vscode-dropdown-border);
     border-radius: 6px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 8px 24px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
     z-index: 10000;
     display: flex;
     flex-direction: row;
@@ -462,13 +462,15 @@ body {
 }
 
 .wip-badge.warning {
-    background: #f59e0b;
-    color: #000;
+    background: var(--vscode-inputValidation-warningBackground, var(--vscode-badge-background));
+    border: 1px solid var(--vscode-inputValidation-warningBorder, transparent);
+    color: var(--vscode-foreground);
 }
 
 .wip-badge.danger {
-    background: #ef4444;
-    color: #fff;
+    background: var(--vscode-inputValidation-errorBackground, var(--vscode-badge-background));
+    border: 1px solid var(--vscode-inputValidation-errorBorder, transparent);
+    color: var(--vscode-foreground);
 }
 
 .column-body {
@@ -493,15 +495,15 @@ body {
 /* Work Item Cards - MODERN DESIGN */
 .card {
     background: var(--vscode-editor-background);
-    border: 2px solid rgba(128, 128, 128, 0.45);
+    border: 2px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.45));
     border-left: 6px solid var(--card-type-color, #4396C2);
     border-radius: 6px;
     padding: 12px;
     cursor: pointer;
     transition: all 0.2s ease;
     position: relative;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
-    color: #ffffff;
+    box-shadow: 0 1px 3px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
+    color: var(--vscode-foreground);
 }
 
 .card.has-children {
@@ -510,7 +512,7 @@ body {
 
 .card:hover {
     background: var(--vscode-list-hoverBackground);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
 }
 
 .card.dragging {
@@ -518,8 +520,8 @@ body {
 }
 
 .card.keyboard-moving {
-    outline: 2px solid var(--card-type-color, #4396C2);
-    box-shadow: 0 0 0 4px rgba(67, 150, 194, 0.2);
+    outline: 2px solid var(--vscode-focusBorder);
+    outline-offset: 2px;
 }
 
 /* Card click animation - smooth pulse effect */
@@ -612,7 +614,7 @@ body {
 .card-id {
     font-size: 13px;
     font-weight: 600;
-    color: #ffffff;
+    color: var(--vscode-foreground);
     cursor: pointer;
 }
 
@@ -622,7 +624,7 @@ body {
 
 .card-title {
     font-size: 13px;
-    color: #ffffff;
+    color: var(--vscode-foreground);
     line-height: 1.4;
     word-wrap: break-word;
 }
@@ -657,20 +659,20 @@ body {
 }
 
 .status-dot.todo {
-    background: #71717a;
+    background: var(--vscode-descriptionForeground);
 }
 
 .status-dot.doing {
-    background: #3b82f6;
+    background: var(--vscode-charts-blue, #3b82f6);
 }
 
 .status-dot.done {
-    background: #22c55e;
+    background: var(--vscode-charts-green, #22c55e);
 }
 
 .status-label {
     font-size: 12px;
-    color: #ffffff;
+    color: var(--vscode-foreground);
 }
 
 /* Assignee */
@@ -704,16 +706,16 @@ body {
 
 .card-avatar.unassigned {
     background: rgba(139, 139, 139, 0.3);
-    color: #8b8b8b;
+    color: var(--vscode-descriptionForeground);
 }
 
 .card-assignee-name {
     font-size: 12px;
-    color: #ffffff;
+    color: var(--vscode-foreground);
 }
 
 .card-assignee-name.unassigned-text {
-    color: #ffffff;
+    color: var(--vscode-foreground);
     opacity: 0.6;
     font-style: italic;
 }
@@ -725,11 +727,11 @@ body {
     gap: 8px;
     margin-bottom: 8px;
     font-size: 12px;
-    color: #ffffff;
+    color: var(--vscode-foreground);
 }
 
 .card-effort-label {
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--vscode-descriptionForeground);
     flex-shrink: 0;
 }
 
@@ -802,7 +804,7 @@ body {
     align-items: center;
     gap: 4px;
     font-size: 11px;
-    color: #ffffff;
+    color: var(--vscode-foreground);
     font-weight: 500;
     cursor: pointer;
     padding: 4px 6px;
@@ -811,7 +813,7 @@ body {
 }
 
 .child-indicator-item:hover {
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
 }
 
 .child-indicator-item svg {
@@ -855,9 +857,9 @@ body {
     display: flex;
     align-items: center;
     gap: 6px;
-    background: rgba(255, 255, 255, 0.03);
+    background: transparent;
     border: none;
-    color: #ffffff;
+    color: var(--vscode-foreground);
     padding: 5px 8px;
     border-radius: 3px;
     cursor: pointer;
@@ -869,7 +871,7 @@ body {
 }
 
 .checklist-add-button:hover {
-    background-color: rgba(255, 255, 255, 0.08);
+    background-color: var(--vscode-list-hoverBackground);
 }
 
 .add-icon {
@@ -889,7 +891,7 @@ body {
 }
 
 .checklist-item:hover {
-    background-color: rgba(255, 255, 255, 0.05);
+    background-color: var(--vscode-list-hoverBackground);
     border-radius: 3px;
 }
 
@@ -972,7 +974,7 @@ body {
 
 .checklist-avatar.unassigned {
     background-color: var(--vscode-input-background);
-    color: #ffffff;
+    color: var(--vscode-foreground);
     border: 1px solid var(--vscode-input-border);
 }
 
@@ -980,7 +982,7 @@ body {
 .checklist-title {
     flex: 1;
     font-size: 13px;
-    color: #ffffff;
+    color: var(--vscode-foreground);
     cursor: pointer;
     user-select: none;
     text-decoration: underline;
@@ -989,17 +991,17 @@ body {
 }
 
 .checklist-title:hover {
-    color: #ffffff;
+    color: var(--vscode-foreground);
 }
 
 .checklist-title.done {
-    color: #ffffff;
+    color: var(--vscode-foreground);
 }
 
 .card-effort-toggle {
     background: transparent;
     border: 1px solid var(--vscode-input-border);
-    color: #ffffff;
+    color: var(--vscode-foreground);
     cursor: pointer;
     padding: 4px 8px;
     border-radius: 4px;
@@ -1033,7 +1035,7 @@ body {
     background: var(--vscode-menu-background);
     border: 1px solid var(--vscode-menu-border);
     border-radius: 6px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
     z-index: 1000;
     padding: 4px 0;
     opacity: 0;
@@ -1081,8 +1083,8 @@ body {
 }
 
 .card-menu-item.danger:hover {
-    background: rgba(209, 52, 56, 0.2);
-    color: #d13438;
+    background: var(--vscode-inputValidation-errorBackground, var(--vscode-menu-selectionBackground));
+    color: var(--vscode-errorForeground);
 }
 
 .card-menu-separator {
@@ -1099,7 +1101,7 @@ body {
     background: var(--vscode-menu-background);
     border: 1px solid var(--vscode-menu-border);
     border-radius: 6px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
     z-index: 1000;
     padding: 4px 0;
 }
@@ -1154,7 +1156,7 @@ body {
     background: var(--vscode-menu-background);
     border: 1px solid var(--vscode-menu-border);
     border-radius: 6px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
     padding: 4px 0;
 }
 
@@ -1193,7 +1195,7 @@ body {
     background: var(--vscode-notifications-background);
     border: 1px solid var(--vscode-notifications-border);
     border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
     z-index: 1000;
     display: none;
     animation: slideIn 0.2s ease;
@@ -1204,11 +1206,11 @@ body {
 }
 
 .toast.success {
-    border-left: 4px solid #10b981;
+    border-left: 4px solid var(--vscode-testing-iconPassed, #10b981);
 }
 
 .toast.error {
-    border-left: 4px solid #ef4444;
+    border-left: 4px solid var(--vscode-errorForeground, #ef4444);
 }
 
 @keyframes slideIn {
@@ -1477,7 +1479,7 @@ body {
     background: var(--vscode-dropdown-background);
     border: 1px solid var(--vscode-dropdown-border);
     border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
     z-index: 1000;
     margin-top: 4px;
     padding: 4px 0;
@@ -1562,4 +1564,47 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
     background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+/* High contrast themes: VS Code supplies contrast borders; draw them on cards, badges and menus */
+body.vscode-high-contrast .card,
+body.vscode-high-contrast-light .card,
+body.vscode-high-contrast .column,
+body.vscode-high-contrast-light .column,
+body.vscode-high-contrast .wip-badge,
+body.vscode-high-contrast-light .wip-badge,
+body.vscode-high-contrast .card-menu,
+body.vscode-high-contrast-light .card-menu {
+    border-color: var(--vscode-contrastBorder);
+}
+
+body.vscode-high-contrast .card:hover,
+body.vscode-high-contrast-light .card:hover,
+body.vscode-high-contrast .card:focus-visible,
+body.vscode-high-contrast-light .card:focus-visible {
+    outline: 1px dashed var(--vscode-contrastActiveBorder);
+    outline-offset: 1px;
+}
+
+/* Windows forced colors: keep borders and focus visible with system colors */
+@media (forced-colors: active) {
+    .card,
+    .column,
+    .wip-badge,
+    .card-menu,
+    .toast {
+        border: 1px solid CanvasText;
+    }
+    .card {
+        border-left-width: 6px;
+    }
+    .card:focus-visible,
+    .card.keyboard-moving,
+    button:focus-visible {
+        outline: 2px solid Highlight;
+    }
+    .status-dot {
+        forced-color-adjust: none;
+        background: CanvasText;
+    }
 }

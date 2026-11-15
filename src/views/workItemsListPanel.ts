@@ -8,6 +8,7 @@ import { azureDevOps } from '../services/azureDevOpsService';
 import { LIST_FIELDS } from '../utils/workItemBatches';
 import { vendorAssetUri } from '../utils/webviewAssets';
 import { serializeForScript } from '../utils/webviewSecurity';
+import { AVATAR_COLORS, STATE_COLORS } from '../utils/stateColors';
 import { WorkItemEventManager } from '../events/workItemEventManager';
 import {
     CHECKBOX_COLUMN_WIDTH,
@@ -798,7 +799,7 @@ export class WorkItemsListPanel {
             background: var(--vscode-dropdown-background);
             border: 1px solid var(--vscode-dropdown-border);
             border-radius: 4px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+            box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
             z-index: 1000;
             margin-top: 4px;
             padding: 4px 0;
@@ -1123,9 +1124,29 @@ export class WorkItemsListPanel {
             background: var(--vscode-badge-background);
             color: var(--vscode-badge-foreground);
         }
-        .state-to-do, .state-new, .state-proposed { background: #0078d422; color: var(--vscode-textLink-foreground, #0078d4); }
-        .state-doing, .state-active, .state-in-progress, .state-committed { background: #ffa50022; color: var(--vscode-editorWarning-foreground, #ffa500); }
-        .state-done, .state-closed, .state-resolved, .state-completed { background: #107c1022; color: var(--vscode-testing-iconPassed, #107c10); }
+        /* Solid fills with white text at 4.5:1 or better, the same as the detail panel */
+        .state-to-do, .state-new, .state-proposed, .state-approved { background: ${STATE_COLORS.proposed}; color: #ffffff; }
+        .state-doing, .state-active, .state-in-progress, .state-committed { background: ${STATE_COLORS.inProgress}; color: #ffffff; }
+        .state-resolved { background: ${STATE_COLORS.resolved}; color: #ffffff; }
+        .state-done, .state-closed, .state-completed { background: ${STATE_COLORS.completed}; color: #ffffff; }
+        .state-removed, .state-cut { background: ${STATE_COLORS.removed}; color: #ffffff; }
+        body.vscode-high-contrast .state-pill,
+        body.vscode-high-contrast-light .state-pill,
+        body.vscode-high-contrast .tag,
+        body.vscode-high-contrast-light .tag {
+            border: 1px solid var(--vscode-contrastBorder);
+        }
+        body.vscode-high-contrast .wi-table tbody tr:hover,
+        body.vscode-high-contrast-light .wi-table tbody tr:hover {
+            outline: 1px dashed var(--vscode-contrastActiveBorder);
+            outline-offset: -1px;
+        }
+        @media (forced-colors: active) {
+            .state-pill, .tag, .avatar { border: 1px solid CanvasText; }
+            .checkbox-cell input[type="checkbox"], .row-checkbox { border-color: CanvasText; }
+            .wi-table tbody tr.selected { outline: 2px solid Highlight; outline-offset: -2px; }
+            :focus-visible { outline: 2px solid Highlight; }
+        }
         .avatar {
             flex-shrink: 0;
             width: 20px;
@@ -1242,7 +1263,7 @@ export class WorkItemsListPanel {
             <button id="bulkChangeAssigneeBtn" class="toolbar-btn-secondary toolbar-btn">
                 <span>Change Assignee</span>
             </button>
-            <button id="bulkDeleteBtn" class="toolbar-btn-secondary toolbar-btn" style="color: #f48771;">
+            <button id="bulkDeleteBtn" class="toolbar-btn-secondary toolbar-btn" style="color: var(--vscode-errorForeground);">
                 <span>Delete</span>
             </button>
         </div>
@@ -1724,37 +1745,19 @@ export class WorkItemsListPanel {
                 });
             }
 
-            // Avatar color utility - generates consistent colors based on display name
+            // Avatar fills with white initials at 4.5:1 or better (AVATAR_COLORS in stateColors.ts)
+            const AVATAR_COLORS = ${serializeForScript(AVATAR_COLORS)};
             function getAvatarColor(displayName) {
                 if (!displayName || displayName === 'Unassigned') {
-                    return { bg: 'rgba(139, 139, 139, 0.3)', fg: '#8b8b8b' };
+                    return { bg: 'rgba(139, 139, 139, 0.3)', fg: 'var(--vscode-foreground)' };
                 }
-
-                // Hash the display name to get a consistent number
                 let hash = 0;
                 for (let i = 0; i < displayName.length; i++) {
                     hash = displayName.charCodeAt(i) + ((hash << 5) - hash);
                 }
-
-                // Predefined pleasant color palette
-                const colors = [
-                    { bg: 'rgba(34, 197, 94, 0.3)', fg: '#22c55e' },   // Green
-                    { bg: 'rgba(59, 130, 246, 0.3)', fg: '#3b82f6' },  // Blue
-                    { bg: 'rgba(168, 85, 247, 0.3)', fg: '#a855f7' },  // Purple
-                    { bg: 'rgba(236, 72, 153, 0.3)', fg: '#ec4899' },  // Pink
-                    { bg: 'rgba(251, 146, 60, 0.3)', fg: '#fb923c' },  // Orange
-                    { bg: 'rgba(14, 165, 233, 0.3)', fg: '#0ea5e9' },  // Cyan
-                    { bg: 'rgba(244, 63, 94, 0.3)', fg: '#f43f5e' },   // Red
-                    { bg: 'rgba(234, 179, 8, 0.3)', fg: '#eab308' },   // Yellow
-                    { bg: 'rgba(20, 184, 166, 0.3)', fg: '#14b8a6' },  // Teal
-                    { bg: 'rgba(139, 92, 246, 0.3)', fg: '#8b5cf6' },  // Violet
-                ];
-
-                const index = Math.abs(hash) % colors.length;
-                return colors[index];
+                return { bg: AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length], fg: '#ffffff' };
             }
 
-            // Apply avatar colors after DOM is loaded
             function applyAvatarColors() {
                 document.querySelectorAll('.avatar').forEach(avatar => {
                     const row = avatar.closest('tr');
