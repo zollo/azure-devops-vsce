@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { log } from '../utils/logger';
-import { notifySuccess } from '../utils/notify';
+import { notifyBulkResult, notifySuccess } from '../utils/notify';
+import { mapWithConcurrency } from '../utils/workItemBatches';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem } from '../models/workItem';
 import { CacheManager } from '../utils/cacheManager';
@@ -347,8 +348,7 @@ export class WorkItemsListPanel {
                 throw new Error('Not connected');
             }
 
-            // Update all work items in parallel
-            await Promise.all(workItemIds.map(id =>
+            const { succeeded, failed } = await WorkItemsListPanel._runBulk(workItemIds, id =>
                 axiosInstance.patch(
                     `/_apis/wit/workitems/${id}`,
                     [{
@@ -361,10 +361,10 @@ export class WorkItemsListPanel {
                         headers: { 'Content-Type': 'application/json-patch+json' }
                     }
                 )
-            ));
+            );
 
             // Update local state instead of full reload
-            workItemIds.forEach(id => {
+            succeeded.forEach(id => {
                 const item = this.workItems.find(wi => wi.id === id);
                 if (item) {
                     item.fields['System.State'] = selected.label;
@@ -372,10 +372,30 @@ export class WorkItemsListPanel {
             });
 
             this._panel.webview.html = this._getHtmlForWebview();
-            notifySuccess(`Updated state for ${workItemIds.length} work items`);
+            notifyBulkResult(`Updated state for ${succeeded.length} work items`, failed.length);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to bulk update state: ${error?.message || error}`);
         }
+    }
+
+    /**
+     * Runs one request per work item, 5 at a time so large selections don't trip Azure DevOps
+     * rate limits, and reports which items succeeded instead of failing the whole batch.
+     */
+    private static async _runBulk(ids: number[], request: (id: number) => Promise<unknown>): Promise<{ succeeded: number[]; failed: number[] }> {
+        const outcomes = await mapWithConcurrency(ids, 5, async id => {
+            try {
+                await request(id);
+                return true;
+            } catch (error) {
+                log.error(`Bulk update failed for #${id}:`, error);
+                return false;
+            }
+        });
+        return {
+            succeeded: ids.filter((_, i) => outcomes[i]),
+            failed: ids.filter((_, i) => !outcomes[i])
+        };
     }
 
     private async _bulkChangeAssignee(workItemIds: number[]) {
@@ -407,8 +427,7 @@ export class WorkItemsListPanel {
                 ? { op: 'replace', path: '/fields/System.AssignedTo', value: selected.uniqueName }
                 : { op: 'remove', path: '/fields/System.AssignedTo' };
 
-            // Update all work items in parallel
-            await Promise.all(workItemIds.map(id =>
+            const { succeeded, failed } = await WorkItemsListPanel._runBulk(workItemIds, id =>
                 axiosInstance.patch(
                     `/_apis/wit/workitems/${id}`,
                     [patchOp],
@@ -417,10 +436,10 @@ export class WorkItemsListPanel {
                         headers: { 'Content-Type': 'application/json-patch+json' }
                     }
                 )
-            ));
+            );
 
             // Update local state instead of full reload
-            workItemIds.forEach(id => {
+            succeeded.forEach(id => {
                 const item = this.workItems.find(wi => wi.id === id);
                 if (item) {
                     if (selected.uniqueName) {
@@ -435,7 +454,7 @@ export class WorkItemsListPanel {
             });
 
             this._panel.webview.html = this._getHtmlForWebview();
-            notifySuccess(`Updated assignee for ${workItemIds.length} work items`);
+            notifyBulkResult(`Updated assignee for ${succeeded.length} work items`, failed.length);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to bulk update assignee: ${error?.message || error}`);
         }
@@ -458,18 +477,18 @@ export class WorkItemsListPanel {
                 throw new Error('Not connected');
             }
 
-            // Delete all work items in parallel
-            await Promise.all(workItemIds.map(id =>
+            const { succeeded, failed } = await WorkItemsListPanel._runBulk(workItemIds, id =>
                 axiosInstance.delete(
                     `/_apis/wit/workitems/${id}`,
                     { params: { 'api-version': '7.1' } }
                 )
-            ));
+            );
 
             // Remove from local state instead of full reload
-            this.workItems = this.workItems.filter(wi => !workItemIds.includes(wi.id));
+            const deleted = new Set(succeeded);
+            this.workItems = this.workItems.filter(wi => !deleted.has(wi.id));
             this._panel.webview.html = this._getHtmlForWebview();
-            notifySuccess(`Deleted ${workItemIds.length} work items`);
+            notifyBulkResult(`Deleted ${succeeded.length} work items`, failed.length);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to delete work items: ${error?.message || error}`);
         }

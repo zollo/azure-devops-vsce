@@ -121,6 +121,15 @@ export async function activate(context: vscode.ExtensionContext) {
         activeWorkItemService
     });
 
+    const refreshAll = () => {
+        workItemProvider.refresh();
+        backlogProvider.refresh();
+        boardProvider.refresh();
+        sprintProvider.refresh();
+        queryProvider.refresh();
+        connectionStatusProvider.refresh();
+    };
+
     // Register configuration change listener
     const contributedSettingKeys = Object.keys(
         context.extension?.packageJSON?.contributes?.configuration?.properties ?? {}
@@ -128,37 +137,45 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration(async (e) => {
             // View-only settings (such as the Work Items columns) are handled by their views
+            if (e.affectsConfiguration('azureDevOps.autoRefreshInterval')) {
+                startAutoRefresh();
+            }
             if (affectsConnectionSettings(e, contributedSettingKeys)) {
                 await authenticationManager.refreshConfiguration();
-                workItemProvider.refresh();
-                backlogProvider.refresh();
-                boardProvider.refresh();
-                sprintProvider.refresh();
-                queryProvider.refresh();
-                connectionStatusProvider.refresh();
+                refreshAll();
             }
         })
     );
 
-    // Auto-refresh interval
+    // Auto-refresh, restarted when the interval setting changes so no reload is needed
     const config = vscode.workspace.getConfiguration('azureDevOps');
-    const refreshInterval = config.get<number>('autoRefreshInterval', 300);
-
-    if (refreshInterval > 0) {
-        const intervalId = setInterval(() => {
-            if (authenticationManager.isConnected()) {
-                workItemProvider.refresh();
-                backlogProvider.refresh();
-                boardProvider.refresh();
-                sprintProvider.refresh();
-                connectionStatusProvider.refresh();
-            }
-        }, refreshInterval * 1000);
-
-        context.subscriptions.push({
-            dispose: () => clearInterval(intervalId)
-        });
+    let autoRefreshTimer: ReturnType<typeof setInterval> | undefined;
+    function startAutoRefresh(): void {
+        if (autoRefreshTimer) {
+            clearInterval(autoRefreshTimer);
+            autoRefreshTimer = undefined;
+        }
+        const refreshInterval = vscode.workspace.getConfiguration('azureDevOps').get<number>('autoRefreshInterval', 300);
+        if (refreshInterval > 0) {
+            autoRefreshTimer = setInterval(() => {
+                if (authenticationManager.isConnected()) {
+                    workItemProvider.refresh();
+                    backlogProvider.refresh();
+                    boardProvider.refresh();
+                    sprintProvider.refresh();
+                    connectionStatusProvider.refresh();
+                }
+            }, refreshInterval * 1000);
+        }
     }
+    startAutoRefresh();
+    context.subscriptions.push({
+        dispose: () => {
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+            }
+        }
+    });
 
     // Initialize status bar
     statusBarManager.updateStatus('disconnected');
@@ -174,13 +191,7 @@ export async function activate(context: vscode.ExtensionContext) {
             if (showNotifications) {
                 vscode.window.showInformationMessage('✓ Connected to Azure DevOps');
             }
-            // Refresh ALL views
-            workItemProvider.refresh();
-            backlogProvider.refresh();
-            boardProvider.refresh();
-            sprintProvider.refresh();
-            queryProvider.refresh();
-            connectionStatusProvider.refresh();
+            refreshAll();
         } else {
             vscode.commands.executeCommand('setContext', 'azureDevOps.connected', false);
             statusBarManager.updateStatus('disconnected');
@@ -193,14 +204,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Watch the connection in the background: refresh expired tokens silently, ask the
     // user to sign in again when that is not possible, and recover after outages.
-    startConnectionMonitor(context, authenticationManager, statusBarManager, () => {
-        workItemProvider.refresh();
-        backlogProvider.refresh();
-        boardProvider.refresh();
-        sprintProvider.refresh();
-        queryProvider.refresh();
-        connectionStatusProvider.refresh();
-    }, health => connectionStatusProvider.setHealth(health));
+    startConnectionMonitor(context, authenticationManager, statusBarManager, refreshAll, health => connectionStatusProvider.setHealth(health));
 
     // New installs and empty configurations get the Get Started wizard (with What's new);
     // configured users get only What's new, once per release.
