@@ -97,14 +97,6 @@ export function getNonce(): string {
 }
 
 /**
- * Encode values as the JSON argument list of a declarative event attribute (see
- * media/shared/webviewHandlers.js), for use inside a single- or double-quoted attribute.
- */
-export function eventArgs(...values: unknown[]): string {
-    return escapeHtml(JSON.stringify(values));
-}
-
-/**
  * Content-Security-Policy for the extension's webviews. Blocks all remote scripts, frames and
  * network requests; images may load over https (avatars, attachments) and from the extension.
  *

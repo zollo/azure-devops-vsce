@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { log } from '../utils/logger';
 import { notifySuccess } from '../utils/notify';
 import { vendorAssetUri } from '../utils/webviewAssets';
-import { escapeHtml, jsArg, sanitizeRichText, serializeForScript, webviewCsp } from '../utils/webviewSecurity';
+import { escapeHtml, getNonce, jsArg, safeCssColor, sanitizeRichText, serializeForScript, webviewCsp } from '../utils/webviewSecurity';
 import { AuthenticationManager } from '../authentication/authenticationManager';
 import { WorkItem } from '../models/workItem';
 import { WorkItemEventManager } from '../events/workItemEventManager';
@@ -693,11 +693,12 @@ export class WorkItemPanel {
     /** Shown when the page itself can't be built, with a way to try again. */
     private _getErrorHtml(message: string): string {
         const id = this._workItem?.id ?? '';
+        const nonce = getNonce();
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview)}">
+    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview, nonce)}">
     <style>
         body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 24px; }
         button { margin-top: 12px; padding: 4px 12px; border: none; cursor: pointer;
@@ -710,7 +711,7 @@ export class WorkItemPanel {
     <h2>Couldn't show work item #${escapeHtml(id)}</h2>
     <p>${escapeHtml(message)}</p>
     <button id="retry">Try again</button>
-    <script>
+    <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
         document.getElementById('retry').addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));
     </script>
@@ -1010,914 +1011,31 @@ export class WorkItemPanel {
             return map[state] || '#8b8b8b';
         };
 
+        // Styles and script live in media/workItem; data for the script goes in #work-item-data
+        const nonce = getNonce();
+        const mediaUri = (...segments: string[]) =>
+            this._panel.webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', ...segments));
+        const workItemCssUri = mediaUri('workItem', 'workItem.css');
+        const workItemJsUri = mediaUri('workItem', 'workItem.js');
+        const handlersJsUri = mediaUri('shared', 'webviewHandlers.js');
+        const workItemData = {
+            description: description || '',
+            acceptanceCriteria: acceptanceCriteria || '',
+            existingTags: this._existingTags,
+            currentTags: tags ? tags.split(';').map((t: string) => t.trim()).filter((t: string) => t) : []
+        };
+
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview)}">
+    <meta http-equiv="Content-Security-Policy" content="${webviewCsp(this._panel.webview, nonce)}">
     <title>#${this._workItem.id}</title>
     <link href="${quillCssUri}" rel="stylesheet">
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: var(--vscode-font-family);
-            color: var(--vscode-foreground);
-            background: var(--vscode-editor-background);
-            line-height: 1.6;
-            padding: 0;
-        }
-
-        /* Entrance animation - smooth slide-in from right with fade */
-        @keyframes slideInFromRight {
-            from {
-                opacity: 0;
-                transform: translateX(20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateX(0);
-            }
-        }
-
-        .container {
-            max-width: 1000px;
-            margin: 0 auto;
-            padding: 24px;
-            animation: slideInFromRight 300ms ease-out;
-        }
-        
-        /* HEADER */
-        .header {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 16px 20px;
-            background: var(--vscode-sideBar-background);
-            border-radius: 8px;
-            margin-bottom: 20px;
-            border-left: 3px solid ${getStateColor(state)};
-        }
-        .type-badge {
-            padding: 4px 10px;
-            background: var(--vscode-badge-background);
-            color: var(--vscode-badge-foreground);
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .work-item-id {
-            font-family: 'Consolas', monospace;
-            font-size: 13px;
-            color: var(--vscode-descriptionForeground);
-            font-weight: 600;
-        }
-        .title-display {
-            flex: 1;
-            font-size: 18px;
-            font-weight: 600;
-            color: var(--vscode-foreground);
-        }
-        .state-pill {
-            padding: 6px 14px;
-            border-radius: 16px;
-            font-size: 12px;
-            font-weight: 600;
-            color: white;
-            background: ${getStateColor(state)};
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .state-pill:hover { opacity: 0.85; transform: scale(1.05); }
-        .quick-actions {
-            display: flex;
-            gap: 8px;
-            position: relative;
-        }
-        .menu-dropdown {
-            position: absolute;
-            top: 100%;
-            right: 0;
-            margin-top: 4px;
-            background: var(--vscode-menu-background);
-            border: 1px solid var(--vscode-menu-border);
-            border-radius: 6px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-            z-index: 1000;
-            min-width: 180px;
-        }
-        .menu-item {
-            padding: 10px 16px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            font-size: 13px;
-            transition: background 0.2s;
-        }
-        .menu-item:hover {
-            background: var(--vscode-menu-selectionBackground);
-            color: var(--vscode-menu-selectionForeground);
-        }
-        .menu-item:first-child {
-            border-radius: 6px 6px 0 0;
-        }
-        .menu-item:last-child {
-            border-radius: 0 0 6px 6px;
-        }
-        .btn-icon {
-            padding: 6px 12px;
-            background: var(--vscode-button-secondaryBackground);
-            color: var(--vscode-button-secondaryForeground);
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: 500;
-            transition: all 0.2s;
-        }
-        .btn-icon:hover {
-            background: var(--vscode-button-secondaryHoverBackground);
-            transform: translateY(-1px);
-        }
-
-        /* CARDS */
-        .card {
-            background: var(--vscode-sideBar-background);
-            border: 1px solid var(--vscode-panel-border);
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 16px;
-        }
-        .card-title {
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: var(--vscode-descriptionForeground);
-            margin-bottom: 16px;
-        }
-
-        /* DETAILS CARD */
-        .details-card { background: var(--vscode-editor-background); }
-        .form-group { margin-bottom: 16px; }
-        .description-display {
-            line-height: 1.6;
-            color: var(--vscode-foreground);
-            transition: all 0.2s ease;
-            border: 1px solid transparent;
-        }
-        .description-display:hover {
-            background: var(--vscode-list-hoverBackground);
-            border: 1px solid var(--vscode-input-border);
-            border-radius: 6px;
-            padding: 12px;
-        }
-        #descriptionEditorContainer, #acceptanceCriteriaEditorContainer {
-            transition: all 0.3s ease;
-            opacity: 0;
-            max-height: 0;
-            overflow: hidden;
-        }
-        #descriptionEditorContainer.show, #acceptanceCriteriaEditorContainer.show {
-            opacity: 1;
-            max-height: 500px;
-        }
-        label {
-            display: block;
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--vscode-descriptionForeground);
-            margin-bottom: 6px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        input[type='text'], textarea {
-            width: 100%;
-            padding: 10px 12px;
-            background: var(--vscode-input-background);
-            color: var(--vscode-input-foreground);
-            border: 1px solid var(--vscode-input-border);
-            border-radius: 6px;
-            font-family: inherit;
-            font-size: 14px;
-            transition: all 0.2s;
-        }
-        input[type='text']:focus, textarea:focus {
-            outline: none;
-            border-color: var(--vscode-focusBorder);
-            box-shadow: 0 0 0 2px var(--vscode-focusBorder);
-        }
-        textarea { min-height: 120px; resize: vertical; }
-
-        /* METADATA GRID */
-        .metadata-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 20px;
-        }
-        .meta-item {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            position: relative;
-            z-index: 1;
-        }
-        .meta-label {
-            font-size: 10px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.8px;
-            color: var(--vscode-descriptionForeground);
-        }
-        .meta-value {
-            font-size: 13px;
-            font-weight: 500;
-            color: var(--vscode-foreground);
-        }
-        .priority-dots {
-            display: flex;
-            gap: 4px;
-            align-items: center;
-        }
-        .priority-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--vscode-input-border);
-        }
-        .priority-dot.filled { background: #ffa500; }
-        .tag-chip {
-            display: inline-block;
-            padding: 3px 8px;
-            background: var(--vscode-badge-background);
-            color: var(--vscode-badge-foreground);
-            border-radius: 10px;
-            font-size: 10px;
-            font-weight: 500;
-            margin-right: 4px;
-        }
-
-        /* Tag Editor */
-        .tags-editor-container {
-            position: relative;
-            width: 100%;
-        }
-        .tags-display {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            align-items: center;
-            padding: 8px;
-            background: var(--vscode-input-background);
-            border: 1px solid var(--vscode-input-border);
-            border-radius: 6px;
-            min-height: 38px;
-            transition: all 0.2s;
-        }
-        .tags-display:focus-within {
-            border-color: var(--vscode-focusBorder);
-            box-shadow: 0 0 0 2px var(--vscode-focusBorder);
-        }
-        .tag-chip-editable {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 4px 8px;
-            background: rgba(33, 150, 243, 0.2);
-            color: #2196f3;
-            border-radius: 10px;
-            font-size: 11px;
-            font-weight: 500;
-        }
-        .tag-remove {
-            background: none;
-            border: none;
-            color: currentColor;
-            cursor: pointer;
-            padding: 0;
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
-            line-height: 1;
-            opacity: 0.6;
-            transition: all 0.2s;
-        }
-        .tag-remove:hover {
-            opacity: 1;
-            background: rgba(255, 255, 255, 0.2);
-        }
-        .tag-input {
-            flex: 1;
-            min-width: 100px;
-            border: none;
-            background: transparent;
-            color: var(--vscode-input-foreground);
-            outline: none;
-            font-size: 11px;
-            padding: 4px;
-        }
-        .tag-suggestions {
-            display: none;
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            background: var(--vscode-menu-background);
-            border: 1px solid var(--vscode-menu-border);
-            border-radius: 6px;
-            margin-top: 4px;
-            max-height: 200px;
-            overflow-y: auto;
-            z-index: 100;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        }
-        .tag-suggestions.show {
-            display: block;
-        }
-        .tag-suggestion-item {
-            padding: 8px 12px;
-            cursor: pointer;
-            font-size: 12px;
-            transition: all 0.2s;
-        }
-        .tag-suggestion-item:hover {
-            background: var(--vscode-list-hoverBackground);
-        }
-        .tag-suggestion-item.selected {
-            background: var(--vscode-list-activeSelectionBackground);
-            color: var(--vscode-list-activeSelectionForeground);
-        }
-
-        .meta-select {
-            width: 100%;
-            padding: 8px 10px;
-            background: var(--vscode-input-background);
-            color: var(--vscode-input-foreground);
-            border: 1px solid var(--vscode-input-border);
-            border-radius: 6px;
-            font-family: inherit;
-            font-size: 13px;
-            cursor: pointer;
-            transition: all 0.2s;
-            position: relative;
-            z-index: 10;
-        }
-        .meta-select:hover {
-            border-color: var(--vscode-focusBorder);
-        }
-        .meta-select:focus {
-            outline: none;
-            border-color: var(--vscode-focusBorder);
-            box-shadow: 0 0 0 2px var(--vscode-focusBorder);
-        }
-        .custom-dropdown-wrapper {
-            position: relative;
-            width: 100%;
-        }
-        .custom-dropdown-btn {
-            text-align: left;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding-right: 24px !important;
-        }
-        .custom-dropdown-btn::after {
-            content: '\\25BC';
-            position: absolute;
-            right: 8px;
-            font-size: 10px;
-            opacity: 0.7;
-        }
-        .iteration-dropdown-list {
-            display: none;
-            position: absolute;
-            top: 100%;
-            right: 0;
-            min-width: 350px;
-            max-height: 300px;
-            overflow-y: auto;
-            background: var(--vscode-dropdown-background);
-            border: 1px solid var(--vscode-dropdown-border);
-            border-radius: 6px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-            z-index: 100;
-            margin-top: 2px;
-        }
-        .iteration-dropdown-list.open-left {
-            display: block;
-            right: 0;
-            left: auto;
-        }
-        .iteration-dropdown-list.open-right {
-            display: block;
-            left: 0;
-            right: auto;
-        }
-        .iteration-dropdown-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 12px;
-            cursor: pointer;
-            transition: background 0.1s;
-            gap: 12px;
-        }
-        .iteration-dropdown-item:hover {
-            background: var(--vscode-list-hoverBackground);
-        }
-        .iteration-dropdown-item.selected {
-            background: var(--vscode-list-activeSelectionBackground);
-            color: var(--vscode-list-activeSelectionForeground);
-        }
-        .iteration-item-name {
-            white-space: nowrap;
-            font-size: 13px;
-        }
-        .iteration-item-dates {
-            white-space: nowrap;
-            font-size: 12px;
-            opacity: 0.9;
-            color: #ffffff;
-        }
-        .area-dropdown-list {
-            display: none;
-            position: absolute;
-            top: 100%;
-            right: 0;
-            min-width: 300px;
-            max-height: 300px;
-            overflow-y: auto;
-            background: var(--vscode-dropdown-background);
-            border: 1px solid var(--vscode-dropdown-border);
-            border-radius: 6px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-            z-index: 100;
-            margin-top: 2px;
-        }
-        .area-dropdown-list.open-left {
-            display: block;
-            right: 0;
-            left: auto;
-        }
-        .area-dropdown-list.open-right {
-            display: block;
-            left: 0;
-            right: auto;
-        }
-        .area-dropdown-item {
-            padding: 8px 12px;
-            cursor: pointer;
-            transition: background 0.1s;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .area-dropdown-item:hover {
-            background: var(--vscode-list-hoverBackground);
-        }
-        .area-dropdown-item.selected {
-            background: var(--vscode-list-activeSelectionBackground);
-            color: var(--vscode-list-activeSelectionForeground);
-        }
-        .assignee-dropdown-list {
-            display: none;
-            position: absolute;
-            top: 100%;
-            right: 0;
-            min-width: 250px;
-            max-height: 300px;
-            overflow-y: auto;
-            background: var(--vscode-dropdown-background);
-            border: 1px solid var(--vscode-dropdown-border);
-            border-radius: 6px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-            z-index: 100;
-            margin-top: 2px;
-        }
-        .assignee-dropdown-list.open-left {
-            display: block;
-            right: 0;
-            left: auto;
-        }
-        .assignee-dropdown-list.open-right {
-            display: block;
-            left: 0;
-            right: auto;
-        }
-        .assignee-dropdown-item {
-            padding: 8px 12px;
-            cursor: pointer;
-            transition: background 0.1s;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .assignee-dropdown-item:hover {
-            background: var(--vscode-list-hoverBackground);
-        }
-        .assignee-dropdown-item.selected {
-            background: var(--vscode-list-activeSelectionBackground);
-            color: var(--vscode-list-activeSelectionForeground);
-        }
-        .meta-input {
-            width: 100%;
-            padding: 8px 10px;
-            background: var(--vscode-input-background);
-            color: var(--vscode-input-foreground);
-            border: 1px solid var(--vscode-input-border);
-            border-radius: 6px;
-            font-family: inherit;
-            font-size: 13px;
-            transition: all 0.2s;
-        }
-        .meta-input:focus {
-            outline: none;
-            border-color: var(--vscode-focusBorder);
-            box-shadow: 0 0 0 2px var(--vscode-focusBorder);
-        }
-        .priority-select-wrapper {
-            display: flex;
-            gap: 6px;
-        }
-        .priority-btn {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            border: 2px solid var(--vscode-input-border);
-            background: transparent;
-            cursor: pointer;
-            font-weight: 700;
-            font-size: 12px;
-            color: var(--vscode-foreground);
-            transition: all 0.2s;
-        }
-        .priority-btn:hover {
-            border-color: var(--vscode-focusBorder);
-            transform: scale(1.1);
-        }
-        .priority-btn.active {
-            background: #ffa500;
-            border-color: #ffa500;
-            color: white;
-        }
-        .priority-btn.p1.active { background: #d13438; border-color: #d13438; }
-        .priority-btn.p2.active { background: #ffa500; border-color: #ffa500; }
-        .priority-btn.p3.active { background: #0078d4; border-color: #0078d4; }
-        .priority-btn.p4.active { background: #107c10; border-color: #107c10; }
-        .effort-input {
-            width: 80px;
-        }
-
-        /* ACTION BAR */
-        .action-bar {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            margin-top: 16px;
-        }
-        .btn-primary {
-            padding: 10px 20px;
-            background: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
-            border: none;
-            border-radius: 6px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .btn-primary:hover {
-            background: var(--vscode-button-hoverBackground);
-            transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-        }
-        .btn-secondary {
-            padding: 10px 20px;
-            background: var(--vscode-button-secondaryBackground);
-            color: var(--vscode-button-secondaryForeground);
-            border: none;
-            border-radius: 6px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .btn-secondary:hover {
-            background: var(--vscode-button-secondaryHoverBackground);
-            transform: translateY(-1px);
-        }
-
-        /* STATE PILLS */
-        .state-pills {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        .state-option {
-            padding: 8px 16px;
-            border: 2px solid var(--vscode-input-border);
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            background: transparent;
-            color: var(--vscode-foreground);
-        }
-        .state-option:hover {
-            border-color: var(--vscode-focusBorder);
-            transform: scale(1.05);
-        }
-        .state-option.active {
-            background: ${getStateColor(state)};
-            border-color: ${getStateColor(state)};
-            color: white;
-        }
-
-        /* COMMENTS */
-        .comment-input-area {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-        #addCommentBtn {
-            transition: all 0.3s ease;
-            opacity: 0;
-            max-height: 0;
-            overflow: hidden;
-        }
-        #addCommentBtn.show {
-            opacity: 1;
-            max-height: 50px;
-        }
-        .comment-input-area textarea {
-            flex: 1;
-            min-height: 80px;
-        }
-        .timeline {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-            margin-top: 16px;
-        }
-        .timeline-item {
-            display: flex;
-            gap: 12px;
-            padding: 12px;
-            background: var(--vscode-editor-background);
-            border-radius: 6px;
-            border-left: 3px solid var(--vscode-focusBorder);
-        }
-        .timeline-icon {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            background: var(--vscode-badge-background);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
-            flex-shrink: 0;
-        }
-        .timeline-content { flex: 1; }
-        .timeline-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 6px;
-        }
-        .comment-actions {
-            display: flex;
-            gap: 4px;
-            opacity: 0;
-            transition: opacity 0.2s;
-        }
-        .timeline-item:hover .comment-actions {
-            opacity: 1;
-        }
-        .comment-action-btn {
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-size: 14px;
-            padding: 4px;
-            opacity: 0.6;
-            transition: opacity 0.2s;
-        }
-        .comment-action-btn:hover {
-            opacity: 1;
-        }
-        .timeline-author {
-            font-weight: 600;
-            font-size: 13px;
-        }
-        .timeline-date {
-            font-size: 11px;
-            color: var(--vscode-descriptionForeground);
-        }
-        .timeline-text {
-            font-size: 13px;
-            line-height: 1.5;
-        }
-        .timeline-text p { margin: 0 0 8px 0; }
-        .timeline-text h1 { font-size: 24px; font-weight: 700; margin: 12px 0 8px 0; }
-        .timeline-text h2 { font-size: 20px; font-weight: 700; margin: 10px 0 6px 0; }
-        .timeline-text h3 { font-size: 16px; font-weight: 700; margin: 8px 0 4px 0; }
-        .timeline-text ul, .timeline-text ol { margin: 0 0 8px 20px; }
-        .timeline-text li { margin: 2px 0; }
-        .timeline-text strong { font-weight: 600; }
-        .timeline-text em { font-style: italic; }
-        .timeline-text s { text-decoration: line-through; }
-        .timeline-text u { text-decoration: underline; }
-        .timeline-text blockquote { border-left: 3px solid var(--vscode-textBlockQuote-border); padding-left: 12px; margin: 8px 0; color: var(--vscode-textBlockQuote-foreground); background: var(--vscode-textBlockQuote-background); }
-        .timeline-text code { background: var(--vscode-textCodeBlock-background); padding: 2px 4px; border-radius: 3px; font-family: monospace; }
-        .timeline-text pre { background: var(--vscode-textCodeBlock-background); padding: 8px; border-radius: 4px; overflow-x: auto; margin: 8px 0; }
-        .timeline-text pre code { padding: 0; background: none; }
-        .timeline-text a { color: var(--vscode-textLink-foreground); text-decoration: none; }
-        .timeline-text a:hover { text-decoration: underline; }
-        .timeline-text img { max-width: 100%; height: auto; margin: 8px 0; border-radius: 4px; display: block; }
-        .ql-editor img { max-width: 100%; height: auto; }
-        .timeline-text .ql-align-center { text-align: center; }
-        .timeline-text .ql-align-right { text-align: right; }
-        .timeline-text .ql-align-justify { text-align: justify; }
-        .timeline-text .ql-indent-1 { padding-left: 3em; }
-        .timeline-text .ql-indent-2 { padding-left: 6em; }
-        .timeline-text .ql-indent-3 { padding-left: 9em; }
-        .ql-toolbar { background: var(--vscode-input-background) !important; border: none !important; border-bottom: 1px solid var(--vscode-input-border) !important; border-radius: 6px 6px 0 0 !important; padding: 4px 6px !important; }
-        #descriptionEditor .ql-toolbar { display: none !important; }
-        #descriptionEditor .ql-toolbar.show { display: block !important; }
-        #commentEditor .ql-toolbar { display: block !important; }
-        .ql-toolbar .ql-formats { margin-right: 8px !important; margin-bottom: 0 !important; }
-        .ql-toolbar button { width: 24px !important; height: 24px !important; padding: 2px !important; }
-        .ql-toolbar .ql-picker-label { padding: 2px 4px !important; height: 24px !important; line-height: 20px !important; }
-        .ql-toolbar .ql-picker { height: 24px !important; }
-        .ql-container { border: none !important; font-size: 13px !important; }
-        .ql-editor { min-height: 100px; color: var(--vscode-input-foreground) !important; }
-        #descriptionEditor .ql-editor { min-height: 120px; }
-        #commentEditor .ql-editor { min-height: 100px; }
-        .ql-editor.ql-blank::before { color: var(--vscode-input-placeholderForeground) !important; font-style: normal !important; }
-        .ql-stroke { stroke: var(--vscode-foreground) !important; }
-        .ql-fill { fill: var(--vscode-foreground) !important; }
-        .ql-picker-label { color: var(--vscode-foreground) !important; }
-        .ql-picker-options { background: var(--vscode-dropdown-background) !important; border: 1px solid var(--vscode-dropdown-border) !important; }
-        .ql-picker-item { color: var(--vscode-dropdown-foreground) !important; }
-        .ql-picker-item:hover { background: var(--vscode-list-hoverBackground) !important; }
-        .ql-toolbar button:hover, .ql-toolbar button.ql-active { color: var(--vscode-button-background) !important; }
-        .ql-toolbar button:hover .ql-stroke, .ql-toolbar button.ql-active .ql-stroke { stroke: var(--vscode-button-background) !important; }
-        .ql-toolbar button:hover .ql-fill, .ql-toolbar button.ql-active .ql-fill { fill: var(--vscode-button-background) !important; }
-        #commentEditor { display: flex; flex-direction: column; }
-        .linked-items {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-        .link-group {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .link-group-title {
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.8px;
-            color: var(--vscode-descriptionForeground);
-            margin-bottom: 4px;
-        }
-        .linked-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 10px 12px;
-            background: var(--vscode-editor-background);
-            border-radius: 6px;
-            border-left: 3px solid var(--vscode-focusBorder);
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .linked-item:hover {
-            background: var(--vscode-list-hoverBackground);
-            transform: translateX(4px);
-        }
-        .linked-item-id {
-            font-family: 'Consolas', monospace;
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--vscode-descriptionForeground);
-        }
-        .linked-item-title {
-            flex: 1;
-            font-size: 13px;
-            color: var(--vscode-foreground);
-        }
-        .linked-item-state {
-            padding: 3px 10px;
-            border-radius: 10px;
-            font-size: 10px;
-            font-weight: 600;
-            color: white;
-        }
-
-        /* ATTACHMENTS */
-        .attachments-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 12px;
-        }
-        .upload-btn {
-            padding: 6px 12px;
-            background: var(--vscode-button-secondaryBackground);
-            color: var(--vscode-button-secondaryForeground);
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            transition: all 0.2s;
-        }
-        .upload-btn:hover {
-            background: var(--vscode-button-secondaryHoverBackground);
-        }
-        .attachments-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .attachment-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 10px 12px;
-            background: var(--vscode-editor-background);
-            border-radius: 6px;
-            border: 1px solid var(--vscode-input-border);
-            transition: all 0.2s;
-        }
-        .attachment-item:hover {
-            border-color: var(--vscode-focusBorder);
-        }
-        .attachment-icon {
-            font-size: 20px;
-        }
-        .attachment-info {
-            flex: 1;
-        }
-        .attachment-name {
-            font-size: 13px;
-            font-weight: 500;
-            color: var(--vscode-foreground);
-            cursor: pointer;
-        }
-        .attachment-name:hover {
-            color: var(--vscode-textLink-foreground);
-            text-decoration: underline;
-        }
-        .attachment-meta {
-            font-size: 11px;
-            color: var(--vscode-descriptionForeground);
-        }
-        .attachment-actions {
-            display: flex;
-            gap: 6px;
-        }
-        .attachment-btn {
-            padding: 4px 8px;
-            background: transparent;
-            color: var(--vscode-foreground);
-            border: 1px solid var(--vscode-input-border);
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 11px;
-            opacity: 0.7;
-            transition: all 0.2s;
-        }
-        .attachment-btn:hover {
-            opacity: 1;
-            border-color: var(--vscode-focusBorder);
-        }
-        .attachment-btn.delete:hover {
-            color: #d13438;
-            border-color: #d13438;
-        }
-        .no-attachments {
-            text-align: center;
-            padding: 20px;
-            color: var(--vscode-descriptionForeground);
-            font-size: 13px;
-        }
-    </style>
-    <script src="${quillJsUri}"></script>
+    <link href="${workItemCssUri}" rel="stylesheet">
+    <style>:root { --state-color: ${safeCssColor(getStateColor(state), '#8b8b8b')}; }</style>
+    <script nonce="${nonce}" src="${quillJsUri}"></script>
 </head>
 <body>
     <div class="container">
@@ -1925,18 +1043,18 @@ export class WorkItemPanel {
             <span class="type-icon" title="${this.escapeHtml(type)}">${this.getWorkItemTypeIcon(type)}</span>
             <span class="work-item-id">#${this._workItem.id}</span>
             <span class="title-display">${title}</span>
-            <span class="state-pill" onclick="scrollToState()">${this.escapeHtml(state)}</span>
+            <span class="state-pill" data-click="scrollToState">${this.escapeHtml(state)}</span>
             <div class="quick-actions">
-                ${assignedTo === 'Unassigned' ? '<button class="btn-icon" onclick="assignToMe()">Assign to me</button>' : ''}
-                <button class="btn-icon" onclick="toggleMenu(event)">⋯</button>
+                ${assignedTo === 'Unassigned' ? '<button class="btn-icon" data-click="assignToMe">Assign to me</button>' : ''}
+                <button class="btn-icon" data-click="toggleMenu" data-click-args='["$event"]'>⋯</button>
                 <div id="menuDropdown" class="menu-dropdown" style="display: none;">
-                    <div class="menu-item" onclick="openInBrowser(); hideMenu();">
+                    <div class="menu-item" data-click="menuOpenInBrowser">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 8px;">
                             <path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm7.5-6.923c-.67.204-1.335.82-1.887 1.855A7.97 7.97 0 0 0 5.145 4H7.5V1.077zM4.09 4a9.267 9.267 0 0 1 .64-1.539 6.7 6.7 0 0 1 .597-.933A7.025 7.025 0 0 0 2.255 4H4.09zm-.582 3.5c.03-.877.138-1.718.312-2.5H1.674a6.958 6.958 0 0 0-.656 2.5h2.49zM4.847 5a12.5 12.5 0 0 0-.338 2.5H7.5V5H4.847zM8.5 5v2.5h2.99a12.495 12.495 0 0 0-.337-2.5H8.5zM4.51 8.5a12.5 12.5 0 0 0 .337 2.5H7.5V8.5H4.51zm3.99 0V11h2.653c.187-.765.306-1.608.338-2.5H8.5zM5.145 12c.138.386.295.744.468 1.068.552 1.035 1.218 1.65 1.887 1.855V12H5.145zm.182 2.472a6.696 6.696 0 0 1-.597-.933A9.268 9.268 0 0 1 4.09 12H2.255a7.024 7.024 0 0 0 3.072 2.472zM3.82 11a13.652 13.652 0 0 1-.312-2.5h-2.49c.062.89.291 1.733.656 2.5H3.82zm6.853 3.472A7.024 7.024 0 0 0 13.745 12H11.91a9.27 9.27 0 0 1-.64 1.539 6.688 6.688 0 0 1-.597.933zM8.5 12v2.923c.67-.204 1.335-.82 1.887-1.855.173-.324.33-.682.468-1.068H8.5zm3.68-1h2.146c.365-.767.594-1.61.656-2.5h-2.49a13.65 13.65 0 0 1-.312 2.5zm2.802-3.5a6.959 6.959 0 0 0-.656-2.5H12.18c.174.782.282 1.623.312 2.5h2.49zM11.27 2.461c.247.464.462.98.64 1.539h1.835a7.024 7.024 0 0 0-3.072-2.472c.218.284.418.598.597.933zM10.855 4a7.966 7.966 0 0 0-.468-1.068C9.835 1.897 9.17 1.282 8.5 1.077V4h2.355z"/>
                         </svg>
                         Open in Browser
                     </div>
-                    <div class="menu-item" onclick="refresh(); hideMenu();">
+                    <div class="menu-item" data-click="menuRefresh">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 8px;">
                             <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
                             <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
@@ -1951,36 +1069,36 @@ export class WorkItemPanel {
             <div class="card-title">Details</div>
             <div class="form-group">
                 <label>Title</label>
-                <input type="text" id="title" value="${title}" onblur="saveTitleOnBlur()">
+                <input type="text" id="title" value="${title}" data-blur="saveTitleOnBlur">
             </div>
             <div class="form-group">
                 <label>Description</label>
-                <div id="descriptionDisplay" class="description-display" onclick="showDescriptionEditor()" style="min-height: 40px; cursor: text; padding: 12px;">${description || '<span style="color: var(--vscode-input-placeholderForeground);">Click to add description...</span>'}</div>
+                <div id="descriptionDisplay" class="description-display" data-click="showDescriptionEditor" style="min-height: 40px; cursor: text; padding: 12px;">${description || '<span style="color: var(--vscode-input-placeholderForeground);">Click to add description...</span>'}</div>
                 <div id="descriptionEditorContainer">
                     <div id="descriptionEditor" style="background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 6px;"></div>
                 </div>
             </div>
             <div class="form-group">
                 <label>Acceptance Criteria</label>
-                <div id="acceptanceCriteriaDisplay" class="description-display" onclick="showAcceptanceCriteriaEditor()" style="min-height: 40px; cursor: text; padding: 12px;">${acceptanceCriteria || '<span style="color: var(--vscode-input-placeholderForeground);">Click to add acceptance criteria...</span>'}</div>
+                <div id="acceptanceCriteriaDisplay" class="description-display" data-click="showAcceptanceCriteriaEditor" style="min-height: 40px; cursor: text; padding: 12px;">${acceptanceCriteria || '<span style="color: var(--vscode-input-placeholderForeground);">Click to add acceptance criteria...</span>'}</div>
                 <div id="acceptanceCriteriaEditorContainer">
                     <div id="acceptanceCriteriaEditor" style="background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 6px;"></div>
                 </div>
             </div>
             <div class="action-bar" style="display: none;">
-                <button class="btn-primary" onclick="saveWorkItem()">
+                <button class="btn-primary" data-click="saveWorkItem">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 6px;">
                         <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
                     </svg>
                     Save
                 </button>
-                <button class="btn-secondary" onclick="openInBrowser()">
+                <button class="btn-secondary" data-click="openInBrowser">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 6px;">
                         <path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm7.5-6.923c-.67.204-1.335.82-1.887 1.855A7.97 7.97 0 0 0 5.145 4H7.5V1.077zM4.09 4a9.267 9.267 0 0 1 .64-1.539 6.7 6.7 0 0 1 .597-.933A7.025 7.025 0 0 0 2.255 4H4.09zm-.582 3.5c.03-.877.138-1.718.312-2.5H1.674a6.958 6.958 0 0 0-.656 2.5h2.49zM4.847 5a12.5 12.5 0 0 0-.338 2.5H7.5V5H4.847zM8.5 5v2.5h2.99a12.495 12.495 0 0 0-.337-2.5H8.5zM4.51 8.5a12.5 12.5 0 0 0 .337 2.5H7.5V8.5H4.51zm3.99 0V11h2.653c.187-.765.306-1.608.338-2.5H8.5zM5.145 12c.138.386.295.744.468 1.068.552 1.035 1.218 1.65 1.887 1.855V12H5.145zm.182 2.472a6.696 6.696 0 0 1-.597-.933A9.268 9.268 0 0 1 4.09 12H2.255a7.024 7.024 0 0 0 3.072 2.472zM3.82 11a13.652 13.652 0 0 1-.312-2.5h-2.49c.062.89.291 1.733.656 2.5H3.82zm6.853 3.472A7.024 7.024 0 0 0 13.745 12H11.91a9.27 9.27 0 0 1-.64 1.539 6.688 6.688 0 0 1-.597.933zM8.5 12v2.923c.67-.204 1.335-.82 1.887-1.855.173-.324.33-.682.468-1.068H8.5zm3.68-1h2.146c.365-.767.594-1.61.656-2.5h-2.49a13.65 13.65 0 0 1-.312 2.5zm2.802-3.5a6.959 6.959 0 0 0-.656-2.5H12.18c.174.782.282 1.623.312 2.5h2.49zM11.27 2.461c.247.464.462.98.64 1.539h1.835a7.024 7.024 0 0 0-3.072-2.472c.218.284.418.598.597.933zM10.855 4a7.966 7.966 0 0 0-.468-1.068C9.835 1.897 9.17 1.282 8.5 1.077V4h2.355z"/>
                     </svg>
                     Open in Browser
                 </button>
-                <button class="btn-secondary" onclick="refresh()">
+                <button class="btn-secondary" data-click="refresh">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 6px;">
                         <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
                         <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
@@ -1996,16 +1114,16 @@ export class WorkItemPanel {
                 <div class="meta-item" style="z-index: 9;">
                     <span class="meta-label">Assigned To</span>
                     <div class="custom-dropdown-wrapper" id="assigneeDropdownWrapper">
-                        <button class="meta-select custom-dropdown-btn" id="assigneeDropdownBtn" type="button" onclick="toggleAssigneeDropdown()">
+                        <button class="meta-select custom-dropdown-btn" id="assigneeDropdownBtn" type="button" data-click="toggleAssigneeDropdown">
                             ${assignedToUniqueName ? this.escapeHtml(this._teamMembers.find(m => m.uniqueName === assignedToUniqueName)?.displayName || 'Unassigned') : 'Unassigned'}
                         </button>
                         <div class="assignee-dropdown-list" id="assigneeDropdownList">
-                            <div class="assignee-dropdown-item ${!assignedToUniqueName ? 'selected' : ''}" onclick="selectAssignee('', 'Unassigned')">
+                            <div class="assignee-dropdown-item ${!assignedToUniqueName ? 'selected' : ''}" data-click="selectAssignee" data-click-args='["", "Unassigned"]'>
                                 Unassigned
                             </div>
                             ${this._teamMembers.map(m => {
                                 const isSelected = m.uniqueName === assignedToUniqueName;
-                                return `<div class="assignee-dropdown-item ${isSelected ? 'selected' : ''}" onclick="selectAssignee(${jsArg(m.uniqueName)}, ${jsArg(m.displayName)})">
+                                return `<div class="assignee-dropdown-item ${isSelected ? 'selected' : ''}" data-click="selectAssignee" data-click-args='[${jsArg(m.uniqueName)}, ${jsArg(m.displayName)}]'>
                                     ${this.escapeHtml(m.displayName)}
                                 </div>`;
                             }).join('')}
@@ -2015,21 +1133,21 @@ export class WorkItemPanel {
                 <div class="meta-item">
                     <span class="meta-label">Priority</span>
                     <div class="priority-select-wrapper">
-                        ${[1, 2, 3, 4].map(p => `<button class="priority-btn p${p} ${priority === p ? 'active' : ''}" onclick="updatePriority(${p})">${p}</button>`).join('')}
+                        ${[1, 2, 3, 4].map(p => `<button class="priority-btn p${p} ${priority === p ? 'active' : ''}" data-click="updatePriority" data-click-args='[${p}]'>${p}</button>`).join('')}
                     </div>
                 </div>
                 <div class="meta-item">
                     <span class="meta-label">Effort / Story Points</span>
-                    <input type="number" class="meta-input effort-input" id="effortInput" value="${this.escapeHtml(String(effort))}" placeholder="0" onchange="updateEffort()">
+                    <input type="number" class="meta-input effort-input" id="effortInput" value="${this.escapeHtml(String(effort))}" placeholder="0" data-change="updateEffort">
                 </div>
                 <div class="meta-item" style="z-index: 10;">
                     <span class="meta-label">Iteration</span>
                     <div class="custom-dropdown-wrapper" id="iterationDropdownWrapper">
-                        <button class="meta-select custom-dropdown-btn" id="iterationDropdownBtn" type="button" onclick="toggleIterationDropdown()">
+                        <button class="meta-select custom-dropdown-btn" id="iterationDropdownBtn" type="button" data-click="toggleIterationDropdown">
                             ${iterationPath ? this.escapeHtml(iterationPath.split('\\').pop() || iterationPath) : 'None'}
                         </button>
                         <div class="iteration-dropdown-list" id="iterationDropdownList">
-                            <div class="iteration-dropdown-item ${!iterationPath ? 'selected' : ''}" onclick="selectIteration('', 'None')">
+                            <div class="iteration-dropdown-item ${!iterationPath ? 'selected' : ''}" data-click="selectIteration" data-click-args='["", "None"]'>
                                 <span class="iteration-item-name">None</span>
                             </div>
                             ${this._iterations.map(iter => {
@@ -2040,7 +1158,7 @@ export class WorkItemPanel {
                                 return `<div class="iteration-dropdown-item ${isSelected ? 'selected' : ''}"
                                     data-path="${this.escapeHtml(iter.path)}"
                                     data-name="${this.escapeHtml(iter.name)}"
-                                    onclick="selectIterationFromData(this)">
+                                    data-click="selectIterationFromData" data-click-args='["$el"]'>
                                     <span class="iteration-item-name">${this.escapeHtml(iter.name)}</span>
                                     ${dateRange ? `<span class="iteration-item-dates">${dateRange}</span>` : ''}
                                 </div>`;
@@ -2052,8 +1170,8 @@ export class WorkItemPanel {
                     <span class="meta-label">Tags</span>
                     <div class="tags-editor-container">
                         <div class="tags-display" id="tagsDisplay">
-                            ${tags ? tags.split(';').map(t => `<span class="tag-chip-editable">${this.escapeHtml(t.trim())}<button class="tag-remove" onclick="removeTag(${jsArg(t.trim())})">×</button></span>`).join('') : ''}
-                            <input type="text" class="tag-input" id="tagInput" placeholder="Add tag..." oninput="handleTagInput()" onkeydown="handleTagKeydown(event)" onfocus="showTagSuggestions()" onblur="hideTagSuggestions()">
+                            ${tags ? tags.split(';').map(t => `<span class="tag-chip-editable">${this.escapeHtml(t.trim())}<button class="tag-remove" data-click="removeTag" data-click-args='[${jsArg(t.trim())}]'>×</button></span>`).join('') : ''}
+                            <input type="text" class="tag-input" id="tagInput" placeholder="Add tag..." data-input="handleTagInput" data-keydown="handleTagKeydown" data-keydown-args='["$event"]' data-focus="showTagSuggestions" data-blur="hideTagSuggestions">
                         </div>
                         <div class="tag-suggestions" id="tagSuggestions"></div>
                     </div>
@@ -2069,7 +1187,7 @@ export class WorkItemPanel {
                 <div class="meta-item" style="z-index: 8;">
                     <span class="meta-label">Area</span>
                     <div class="custom-dropdown-wrapper" id="areaDropdownWrapper">
-                        <button class="meta-select custom-dropdown-btn" id="areaDropdownBtn" type="button" onclick="toggleAreaDropdown()">
+                        <button class="meta-select custom-dropdown-btn" id="areaDropdownBtn" type="button" data-click="toggleAreaDropdown">
                             ${areaPath ? this.escapeHtml(areaPath.split('\\').pop() || areaPath) : 'Select Area'}
                         </button>
                         <div class="area-dropdown-list" id="areaDropdownList">
@@ -2078,7 +1196,7 @@ export class WorkItemPanel {
                                 return `<div class="area-dropdown-item ${isSelected ? 'selected' : ''}"
                                     data-path="${this.escapeHtml(area.path)}"
                                     data-name="${this.escapeHtml(area.name)}"
-                                    onclick="selectAreaFromData(this)">
+                                    data-click="selectAreaFromData" data-click-args='["$el"]'>
                                     ${this.escapeHtml(area.name)}
                                 </div>`;
                             }).join('')}
@@ -2100,7 +1218,7 @@ export class WorkItemPanel {
                     <div class="link-group">
                         <div class="link-group-title">${this.escapeHtml(linkType)} (${items.length})</div>
                         ${items.map((item: any) => `
-                            <div class="linked-item" onclick="openLinkedItem(${item.id})">
+                            <div class="linked-item" data-click="openLinkedItem" data-click-args='[${item.id}]'>
                                 <span class="linked-item-id">#${item.id}</span>
                                 <span class="linked-item-title">${this.escapeHtml(item.title)}</span>
                                 <span class="linked-item-state" style="background: ${this.getStateColorForLinked(item.state)}">${this.escapeHtml(item.state)}</span>
@@ -2115,7 +1233,7 @@ export class WorkItemPanel {
         <div class="card">
             <div class="attachments-header">
                 <div class="card-title" style="margin-bottom: 0;">📎 Attachments (${attachments.length})</div>
-                <button class="upload-btn" onclick="uploadAttachment()">+ Upload File</button>
+                <button class="upload-btn" data-click="uploadAttachment">+ Upload File</button>
             </div>
             ${attachments.length > 0 ? `
             <div class="attachments-list">
@@ -2123,12 +1241,12 @@ export class WorkItemPanel {
                     <div class="attachment-item">
                         <span class="attachment-icon">${this.getFileIcon(att.name)}</span>
                         <div class="attachment-info">
-                            <div class="attachment-name" onclick="downloadAttachment(${jsArg(att.url)}, ${jsArg(att.name)})">${this.escapeHtml(att.name)}</div>
+                            <div class="attachment-name" data-click="downloadAttachment" data-click-args='[${jsArg(att.url)}, ${jsArg(att.name)}]'>${this.escapeHtml(att.name)}</div>
                             <div class="attachment-meta">${att.resourceSize ? this.formatFileSize(att.resourceSize) : ''}${att.comment ? ' • ' + this.escapeHtml(att.comment) : ''}</div>
                         </div>
                         <div class="attachment-actions">
-                            <button class="attachment-btn" onclick="downloadAttachment(${jsArg(att.url)}, ${jsArg(att.name)})" title="Download">↓</button>
-                            <button class="attachment-btn delete" onclick="deleteAttachment(${jsArg(att.url)})" title="Remove">×</button>
+                            <button class="attachment-btn" data-click="downloadAttachment" data-click-args='[${jsArg(att.url)}, ${jsArg(att.name)}]' title="Download">↓</button>
+                            <button class="attachment-btn delete" data-click="deleteAttachment" data-click-args='[${jsArg(att.url)}]' title="Remove">×</button>
                         </div>
                     </div>
                 `).join('')}
@@ -2141,7 +1259,7 @@ export class WorkItemPanel {
         <div class="card" id="stateSection">
             <div class="card-title">Change State</div>
             <div class="state-pills">
-                ${stateOptions.map(s => `<button class="state-option ${s === state ? 'active' : ''}" onclick="changeState(${jsArg(s)})">${this.escapeHtml(s)}</button>`).join('')}
+                ${stateOptions.map(s => `<button class="state-option ${s === state ? 'active' : ''}" data-click="changeState" data-click-args='[${jsArg(s)}]'>${this.escapeHtml(s)}</button>`).join('')}
             </div>
         </div>
 
@@ -2152,7 +1270,7 @@ export class WorkItemPanel {
             </div>
             <div class="comment-input-area">
                 <div id="commentEditor" style="width: 100%; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 6px;"></div>
-                <button id="addCommentBtn" class="btn-secondary" onclick="addComment()" style="display: none;">Add Comment</button>
+                <button id="addCommentBtn" class="btn-secondary" data-click="addComment" style="display: none;">Add Comment</button>
             </div>
         </div>
 
@@ -2167,16 +1285,16 @@ export class WorkItemPanel {
                             <div class="timeline-header">
                                 <span class="timeline-author">${this.escapeHtml(c.createdBy?.displayName || 'Unknown')} <span style="text-decoration: underline; font-weight: normal;">commented ${this.formatRelativeTime(c.createdDate)}</span></span>
                                 <div class="comment-actions">
-                                    <button class="comment-action-btn" onclick="editComment(${c.id})" title="Edit">✏️</button>
-                                    <button class="comment-action-btn" onclick="deleteComment(${c.id})" title="Delete">🗑️</button>
+                                    <button class="comment-action-btn" data-click="editComment" data-click-args='[${c.id}]' title="Edit">✏️</button>
+                                    <button class="comment-action-btn" data-click="deleteComment" data-click-args='[${c.id}]' title="Delete">🗑️</button>
                                 </div>
                             </div>
                             <div class="timeline-text" id="comment-${c.id}" style="word-wrap: break-word;">${sanitizeRichText(c.text || '')}</div>
                             <div id="edit-${c.id}" style="display: none;">
                                 <div id="editor-${c.id}" style="background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 6px; margin-top: 8px;"></div>
                                 <div style="margin-top: 8px; display: flex; gap: 8px;">
-                                    <button class="btn-secondary" onclick="saveEdit(${c.id})">Save</button>
-                                    <button class="btn-secondary" onclick="cancelEdit(${c.id})">Cancel</button>
+                                    <button class="btn-secondary" data-click="saveEdit" data-click-args='[${c.id}]'>Save</button>
+                                    <button class="btn-secondary" data-click="cancelEdit" data-click-args='[${c.id}]'>Cancel</button>
                                 </div>
                             </div>
                         </div>
@@ -2187,804 +1305,9 @@ export class WorkItemPanel {
         ` : ''}
     </div>
 
-    <script>
-        const vscode = acquireVsCodeApi();
-        console.log('WorkItem panel script loaded');
-        console.log('Team members count:', ${this._teamMembers.length});
-        console.log('Iterations count:', ${this._iterations.length});
-        console.log('Areas count:', ${this._areas.length});
-
-        function showDescriptionEditor() {
-            const display = document.getElementById('descriptionDisplay');
-            const container = document.getElementById('descriptionEditorContainer');
-
-            // Guard: prevent selection-change from hiding the editor while we're opening it
-            descriptionEditorOpening = true;
-
-            // Load current content from display into editor
-            const currentHtml = display.innerHTML;
-            if (currentHtml && !currentHtml.includes('Click to add description')) {
-                descriptionQuill.setContents([]);
-                descriptionQuill.clipboard.dangerouslyPasteHTML(0, currentHtml);
-            }
-
-            display.style.display = 'none';
-            container.classList.add('show');
-            // Explicitly show the toolbar
-            if (descToolbarEl) descToolbarEl.style.display = 'block';
-            setTimeout(() => {
-                descriptionQuill.focus();
-                descriptionEditorOpening = false;
-            }, 150);
-        }
-
-        function hideDescriptionEditor() {
-            const html = descriptionQuill.root.innerHTML;
-            const text = descriptionQuill.getText().trim();
-            const display = document.getElementById('descriptionDisplay');
-            const container = document.getElementById('descriptionEditorContainer');
-
-            container.classList.remove('show');
-            setTimeout(() => {
-                // Check if editor is actually empty by checking text content
-                if (!text || text.length === 0) {
-                    display.innerHTML = '<span style="color: var(--vscode-input-placeholderForeground);">Click to add description...</span>';
-                } else {
-                    display.innerHTML = html;
-                }
-                display.style.display = 'block';
-            }, 300);
-
-            // Only save if user actually edited the description
-            if (descriptionDirty) {
-                const title = document.getElementById('title').value;
-                const acceptanceCriteria = acceptanceCriteriaQuill ? acceptanceCriteriaQuill.root.innerHTML : '';
-                vscode.postMessage({ command: 'save', data: { title, description: html, acceptanceCriteria } });
-                descriptionDirty = false;
-            }
-        }
-
-        function showAcceptanceCriteriaEditor() {
-            const display = document.getElementById('acceptanceCriteriaDisplay');
-            const container = document.getElementById('acceptanceCriteriaEditorContainer');
-
-            // Guard: prevent selection-change from hiding the editor while we're opening it
-            acceptanceCriteriaEditorOpening = true;
-
-            // Load current content from display into editor
-            const currentHtml = display.innerHTML;
-            if (currentHtml && !currentHtml.includes('Click to add acceptance criteria')) {
-                acceptanceCriteriaQuill.setContents([]);
-                acceptanceCriteriaQuill.clipboard.dangerouslyPasteHTML(0, currentHtml);
-            }
-
-            display.style.display = 'none';
-            container.classList.add('show');
-            // Explicitly show the toolbar
-            if (acToolbarEl) acToolbarEl.style.display = 'block';
-            setTimeout(() => {
-                acceptanceCriteriaQuill.focus();
-                acceptanceCriteriaEditorOpening = false;
-            }, 150);
-        }
-
-        function hideAcceptanceCriteriaEditor() {
-            const html = acceptanceCriteriaQuill.root.innerHTML;
-            const text = acceptanceCriteriaQuill.getText().trim();
-            const display = document.getElementById('acceptanceCriteriaDisplay');
-            const container = document.getElementById('acceptanceCriteriaEditorContainer');
-
-            container.classList.remove('show');
-            setTimeout(() => {
-                // Check if editor is actually empty by checking text content
-                if (!text || text.length === 0) {
-                    display.innerHTML = '<span style="color: var(--vscode-input-placeholderForeground);">Click to add acceptance criteria...</span>';
-                } else {
-                    display.innerHTML = html;
-                }
-                display.style.display = 'block';
-            }, 300);
-
-            // Only save if user actually edited the acceptance criteria
-            if (acceptanceCriteriaDirty) {
-                const title = document.getElementById('title').value;
-                const description = descriptionQuill ? descriptionQuill.root.innerHTML : '';
-                vscode.postMessage({ command: 'save', data: { title, description, acceptanceCriteria: html } });
-                acceptanceCriteriaDirty = false;
-            }
-        }
-
-        function toggleMenu(event) {
-            event.stopPropagation();
-            const menu = document.getElementById('menuDropdown');
-            menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
-        }
-
-        function hideMenu() {
-            document.getElementById('menuDropdown').style.display = 'none';
-        }
-
-        document.addEventListener('click', function() {
-            hideMenu();
-        });
-
-        function saveTitleOnBlur() {
-            const title = document.getElementById('title').value;
-            const description = descriptionQuill ? descriptionQuill.root.innerHTML : '';
-            const acceptanceCriteria = acceptanceCriteriaQuill ? acceptanceCriteriaQuill.root.innerHTML : '';
-            vscode.postMessage({ command: 'save', data: { title, description, acceptanceCriteria } });
-        }
-
-        function saveWorkItem() {
-            const title = document.getElementById('title').value;
-            const description = descriptionQuill ? descriptionQuill.root.innerHTML : '';
-            const acceptanceCriteria = acceptanceCriteriaQuill ? acceptanceCriteriaQuill.root.innerHTML : '';
-            vscode.postMessage({ command: 'save', data: { title, description, acceptanceCriteria } });
-        }
-
-        function changeState(state) {
-            vscode.postMessage({ command: 'changeState', state });
-        }
-
-        let quill;
-        let descriptionQuill;
-        let acceptanceCriteriaQuill;
-        let editQuills = {};
-        let descriptionDirty = false;
-        let acceptanceCriteriaDirty = false;
-        let descriptionEditorOpening = false;
-        let acceptanceCriteriaEditorOpening = false;
-        let descToolbarEl = null;
-        let acToolbarEl = null;
-
-        function initQuill() {
-            try {
-                console.log('Starting Quill initialization...');
-                // Initialize description editor
-                console.log('Initializing description editor...');
-                descriptionQuill = new Quill('#descriptionEditor', {
-                theme: 'snow',
-                placeholder: 'Add a clear description...',
-                modules: {
-                    toolbar: [
-                        [{ header: [1, 2, 3, false] }],
-                        ['bold', 'italic', 'underline', 'strike'],
-                        [{ color: [] }, { background: [] }],
-                        [{ align: [] }],
-                        [{ list: 'ordered'}, { list: 'bullet' }, { indent: '-1'}, { indent: '+1' }],
-                        ['blockquote', 'code-block'],
-                        ['link'],
-                        ['clean']
-                    ]
-                }
-            });
-            console.log('Description editor created');
-
-            // Set initial content using Quill's API to avoid Delta model crash
-            const descriptionContent = ${serializeForScript(description || '')};
-            if (descriptionContent) {
-                descriptionQuill.clipboard.dangerouslyPasteHTML(0, descriptionContent);
-            }
-
-            // Track user edits to description (only 'user' source means the user typed)
-            descriptionQuill.on('text-change', function(delta, oldDelta, source) {
-                if (source === 'user') {
-                    descriptionDirty = true;
-                }
-            });
-
-            // Hide toolbar after Quill finishes rendering
-            setTimeout(() => {
-                const descContainer = document.querySelector('#descriptionEditor');
-                descToolbarEl = descContainer ? descContainer.previousElementSibling : null;
-                if (descToolbarEl && descToolbarEl.classList.contains('ql-toolbar')) {
-                    descToolbarEl.style.display = 'none';
-
-                    descriptionQuill.on('selection-change', function(range) {
-                        // Skip if editor is in the process of opening
-                        if (descriptionEditorOpening) return;
-                        if (!range && descToolbarEl) {
-                            descToolbarEl.style.display = 'none';
-                            hideDescriptionEditor();
-                        } else if (range && descToolbarEl) {
-                            descToolbarEl.style.display = 'block';
-                        }
-                    });
-                }
-            }, 100);
-
-            // Initialize acceptance criteria editor
-            console.log('Initializing acceptance criteria editor...');
-            acceptanceCriteriaQuill = new Quill('#acceptanceCriteriaEditor', {
-                theme: 'snow',
-                placeholder: 'Add acceptance criteria...',
-                modules: {
-                    toolbar: [
-                        [{ header: [1, 2, 3, false] }],
-                        ['bold', 'italic', 'underline', 'strike'],
-                        [{ color: [] }, { background: [] }],
-                        [{ align: [] }],
-                        [{ list: 'ordered'}, { list: 'bullet' }, { indent: '-1'}, { indent: '+1' }],
-                        ['blockquote', 'code-block'],
-                        ['link'],
-                        ['clean']
-                    ]
-                }
-            });
-            console.log('Acceptance criteria editor created');
-
-            // Set initial acceptance criteria content using Quill's API
-            const acceptanceCriteriaContent = ${serializeForScript(acceptanceCriteria || '')};
-            if (acceptanceCriteriaContent) {
-                acceptanceCriteriaQuill.clipboard.dangerouslyPasteHTML(0, acceptanceCriteriaContent);
-            }
-
-            // Track user edits to acceptance criteria
-            acceptanceCriteriaQuill.on('text-change', function(delta, oldDelta, source) {
-                if (source === 'user') {
-                    acceptanceCriteriaDirty = true;
-                }
-            });
-
-            // Hide acceptance criteria toolbar initially
-            setTimeout(() => {
-                const acContainer = document.querySelector('#acceptanceCriteriaEditor');
-                acToolbarEl = acContainer ? acContainer.previousElementSibling : null;
-                if (acToolbarEl && acToolbarEl.classList.contains('ql-toolbar')) {
-                    acToolbarEl.style.display = 'none';
-
-                    acceptanceCriteriaQuill.on('selection-change', function(range) {
-                        // Skip if editor is in the process of opening
-                        if (acceptanceCriteriaEditorOpening) return;
-                        if (!range && acToolbarEl) {
-                            acToolbarEl.style.display = 'none';
-                            hideAcceptanceCriteriaEditor();
-                        } else if (range && acToolbarEl) {
-                            acToolbarEl.style.display = 'block';
-                        }
-                    });
-                }
-            }, 100);
-
-            // Initialize comment editor (always show toolbar)
-            console.log('Initializing comment editor...');
-            quill = new Quill('#commentEditor', {
-                theme: 'snow',
-                placeholder: 'Write a comment... (supports rich text formatting)',
-                modules: {
-                    toolbar: {
-                        container: [
-                            [{ header: [1, 2, 3, false] }],
-                            ['bold', 'italic', 'underline', 'strike'],
-                            [{ color: [] }, { background: [] }],
-                            [{ align: [] }],
-                            [{ list: 'ordered'}, { list: 'bullet' }, { indent: '-1'}, { indent: '+1' }],
-                            ['blockquote', 'code-block'],
-                            ['link', 'image'],
-                            ['clean']
-                        ],
-                        handlers: {
-                            image: imageHandler
-                        }
-                    }
-                }
-            });
-
-            // Hide comment toolbar initially, show on focus
-            console.log('Comment editor initialized');
-            setTimeout(() => {
-                const commentContainer = document.querySelector('#commentEditor');
-                const commentToolbar = commentContainer ? commentContainer.previousElementSibling : null;
-                const addCommentBtn = document.getElementById('addCommentBtn');
-                
-                if (commentToolbar && commentToolbar.classList.contains('ql-toolbar')) {
-                    commentToolbar.style.display = 'none';
-                    commentToolbar.style.transition = 'all 0.3s ease';
-                    
-                    quill.on('selection-change', function(range) {
-                        if (range) {
-                            commentToolbar.style.display = 'block';
-                            if (addCommentBtn) {
-                                addCommentBtn.style.display = 'block';
-                                setTimeout(() => addCommentBtn.classList.add('show'), 10);
-                            }
-                        } else {
-                            commentToolbar.style.display = 'none';
-                            if (addCommentBtn) {
-                                addCommentBtn.classList.remove('show');
-                                setTimeout(() => addCommentBtn.style.display = 'none', 300);
-                            }
-                        }
-                    });
-                }
-            }, 100);
-        } catch (error) {
-            console.error('Error initializing Quill:', error);
-            console.error('Error details:', error.message, error.stack);
-        }
-    }
-
-        function imageHandler() {
-            const input = document.createElement('input');
-            input.setAttribute('type', 'file');
-            input.setAttribute('accept', 'image/*');
-            input.click();
-
-            input.onchange = () => {
-                const file = input.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        vscode.postMessage({ 
-                            command: 'uploadImage', 
-                            imageData: e.target.result 
-                        });
-                    };
-                    reader.readAsDataURL(file);
-                }
-            };
-        }
-
-        window.addEventListener('message', event => {
-            const message = event.data;
-            if (message.command === 'imageUploaded') {
-                const range = quill.getSelection(true);
-                quill.insertEmbed(range.index, 'image', message.url);
-            }
-        });
-
-        function editComment(commentId) {
-            const commentDiv = document.getElementById('comment-' + commentId);
-            const editDiv = document.getElementById('edit-' + commentId);
-            const editorDiv = document.getElementById('editor-' + commentId);
-            
-            commentDiv.style.display = 'none';
-            editDiv.style.display = 'block';
-            
-            if (!editQuills[commentId]) {
-                editQuills[commentId] = new Quill('#editor-' + commentId, {
-                    theme: 'snow',
-                    modules: {
-                        toolbar: [
-                            [{ header: [1, 2, 3, false] }],
-                            ['bold', 'italic', 'underline', 'strike'],
-                            [{ color: [] }, { background: [] }],
-                            [{ align: [] }],
-                            [{ list: 'ordered'}, { list: 'bullet' }, { indent: '-1'}, { indent: '+1' }],
-                            ['blockquote', 'code-block'],
-                            ['link', 'image'],
-                            ['clean']
-                        ]
-                    }
-                });
-                editQuills[commentId].clipboard.dangerouslyPasteHTML(0, commentDiv.innerHTML);
-            }
-        }
-
-        function saveEdit(commentId) {
-            const editor = editQuills[commentId];
-            if (!editor) return;
-            
-            const html = editor.root.innerHTML;
-            const text = editor.getText().trim();
-            
-            if (text) {
-                vscode.postMessage({ command: 'updateComment', commentId: commentId, comment: html });
-            }
-        }
-
-        function cancelEdit(commentId) {
-            const commentDiv = document.getElementById('comment-' + commentId);
-            const editDiv = document.getElementById('edit-' + commentId);
-            
-            commentDiv.style.display = 'block';
-            editDiv.style.display = 'none';
-        }
-
-        function deleteComment(commentId) {
-            vscode.postMessage({ command: 'deleteComment', commentId: commentId });
-        }
-
-        function addComment() {
-            if (!quill) return;
-            let html = quill.root.innerHTML;
-            const text = quill.getText().trim();
-            
-            // Remove base64 images (they cause 500 errors)
-            html = html.replace(/<img[^>]+src="data:image[^>]+>/gi, '<p>[Image removed - use attachment upload instead]</p>');
-            
-            if (text) {
-                vscode.postMessage({ command: 'addComment', comment: html });
-                quill.setContents([]);
-            }
-        }
-        
-        // Initialize Quill after page loads
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initQuill);
-        } else {
-            initQuill();
-        }
-
-        function refresh() {
-            vscode.postMessage({ command: 'refresh' });
-        }
-
-        function openInBrowser() {
-            vscode.postMessage({ command: 'openInBrowser' });
-        }
-
-        function assignToMe() {
-            vscode.postMessage({ command: 'assignToMe' });
-        }
-
-        function scrollToState() {
-            document.getElementById('stateSection').scrollIntoView({ behavior: 'smooth' });
-        }
-
-        function openLinkedItem(id) {
-            vscode.postMessage({ command: 'openLinkedItem', id });
-        }
-
-        function updateAssignee() {
-            console.log('updateAssignee called');
-            const select = document.getElementById('assigneeSelect');
-            console.log('Assignee select element:', select);
-            console.log('Selected value:', select.value);
-            vscode.postMessage({ command: 'assignTo', uniqueName: select.value });
-        }
-
-        function updatePriority(priority) {
-            console.log('updatePriority called:', priority);
-            document.querySelectorAll('.priority-btn').forEach(btn => btn.classList.remove('active'));
-            document.querySelector('.priority-btn.p' + priority).classList.add('active');
-            vscode.postMessage({ command: 'updateField', field: 'Microsoft.VSTS.Common.Priority', value: priority });
-        }
-
-        function updateEffort() {
-            console.log('updateEffort called');
-            const input = document.getElementById('effortInput');
-            const value = input.value ? parseFloat(input.value) : null;
-            console.log('Effort value:', value);
-            // Try both field names for story points
-            vscode.postMessage({ command: 'updateField', field: 'Microsoft.VSTS.Scheduling.StoryPoints', value: value });
-        }
-
-        function toggleIterationDropdown() {
-            const list = document.getElementById('iterationDropdownList');
-            const wrapper = document.getElementById('iterationDropdownWrapper');
-            const isOpen = list.classList.contains('open-left') || list.classList.contains('open-right');
-
-            // Close any other open dropdowns first
-            document.querySelectorAll('.iteration-dropdown-list.open-left, .iteration-dropdown-list.open-right').forEach(el => {
-                el.classList.remove('open-left', 'open-right');
-            });
-
-            if (!isOpen) {
-                // Calculate available space on left and right
-                const rect = wrapper.getBoundingClientRect();
-                const viewportWidth = window.innerWidth;
-                const spaceOnRight = viewportWidth - rect.right;
-                const spaceOnLeft = rect.left;
-                const dropdownWidth = 350; // min-width of dropdown
-
-                // Open to the side with more space, preferring left if both are insufficient
-                if (spaceOnLeft >= dropdownWidth || spaceOnLeft > spaceOnRight) {
-                    list.classList.add('open-left');
-                } else {
-                    list.classList.add('open-right');
-                }
-            }
-        }
-
-        function selectIteration(path, name) {
-            console.log('[WorkItemPanel - WebView] selectIteration called with path:', path, 'name:', name);
-            const btn = document.getElementById('iterationDropdownBtn');
-            const list = document.getElementById('iterationDropdownList');
-            btn.textContent = name;
-            list.classList.remove('open-left', 'open-right');
-            // Update selected state
-            list.querySelectorAll('.iteration-dropdown-item').forEach(item => item.classList.remove('selected'));
-            event.currentTarget.classList.add('selected');
-            console.log('[WorkItemPanel - WebView] Sending updateField message with path:', path);
-            vscode.postMessage({ command: 'updateField', field: 'System.IterationPath', value: path || null });
-        }
-
-        function selectIterationFromData(element) {
-            const path = element.dataset.path;
-            const name = element.dataset.name;
-            console.log('[WorkItemPanel - WebView] selectIterationFromData called with path:', path, 'name:', name);
-            const btn = document.getElementById('iterationDropdownBtn');
-            const list = document.getElementById('iterationDropdownList');
-            btn.textContent = name;
-            list.classList.remove('open-left', 'open-right');
-            // Update selected state
-            list.querySelectorAll('.iteration-dropdown-item').forEach(item => item.classList.remove('selected'));
-            element.classList.add('selected');
-            console.log('[WorkItemPanel - WebView] Sending updateField message with path:', path);
-            vscode.postMessage({ command: 'updateField', field: 'System.IterationPath', value: path || null });
-        }
-
-        function toggleAreaDropdown() {
-            const list = document.getElementById('areaDropdownList');
-            const wrapper = document.getElementById('areaDropdownWrapper');
-            const isOpen = list.classList.contains('open-left') || list.classList.contains('open-right');
-
-            // Close any other open dropdowns first
-            document.querySelectorAll('.iteration-dropdown-list.open-left, .iteration-dropdown-list.open-right, .area-dropdown-list.open-left, .area-dropdown-list.open-right').forEach(el => {
-                el.classList.remove('open-left', 'open-right');
-            });
-
-            if (!isOpen) {
-                // Calculate available space on left and right
-                const rect = wrapper.getBoundingClientRect();
-                const viewportWidth = window.innerWidth;
-                const spaceOnRight = viewportWidth - rect.right;
-                const spaceOnLeft = rect.left;
-                const dropdownWidth = 300; // min-width of dropdown
-
-                // Open to the side with more space, preferring left if both are insufficient
-                if (spaceOnLeft >= dropdownWidth || spaceOnLeft > spaceOnRight) {
-                    list.classList.add('open-left');
-                } else {
-                    list.classList.add('open-right');
-                }
-            }
-        }
-
-        function selectArea(path) {
-            console.log('[WorkItemPanel - WebView] selectArea called with path:', path);
-            const btn = document.getElementById('areaDropdownBtn');
-            const list = document.getElementById('areaDropdownList');
-            // Display only the last segment (e.g., "DevOps" instead of "Experian Verifications\\DevOps")
-            const displayName = path.split('\\\\').pop() || path;
-            btn.textContent = displayName;
-            list.classList.remove('open-left', 'open-right');
-            // Update selected state
-            list.querySelectorAll('.area-dropdown-item').forEach(item => item.classList.remove('selected'));
-            event.currentTarget.classList.add('selected');
-            console.log('[WorkItemPanel - WebView] Sending updateField message with path:', path);
-            vscode.postMessage({ command: 'updateField', field: 'System.AreaPath', value: path });
-        }
-
-        function selectAreaFromData(element) {
-            const path = element.dataset.path;
-            const name = element.dataset.name;
-            console.log('[WorkItemPanel - WebView] selectAreaFromData called with path:', path, 'name:', name);
-            const btn = document.getElementById('areaDropdownBtn');
-            const list = document.getElementById('areaDropdownList');
-            btn.textContent = name;
-            list.classList.remove('open-left', 'open-right');
-            // Update selected state
-            list.querySelectorAll('.area-dropdown-item').forEach(item => item.classList.remove('selected'));
-            element.classList.add('selected');
-            console.log('[WorkItemPanel - WebView] Sending updateField message with path:', path);
-            vscode.postMessage({ command: 'updateField', field: 'System.AreaPath', value: path });
-        }
-
-        function toggleAssigneeDropdown() {
-            const list = document.getElementById('assigneeDropdownList');
-            const wrapper = document.getElementById('assigneeDropdownWrapper');
-            const isOpen = list.classList.contains('open-left') || list.classList.contains('open-right');
-
-            // Close any other open dropdowns first
-            document.querySelectorAll('.iteration-dropdown-list.open-left, .iteration-dropdown-list.open-right, .area-dropdown-list.open-left, .area-dropdown-list.open-right, .assignee-dropdown-list.open-left, .assignee-dropdown-list.open-right').forEach(el => {
-                el.classList.remove('open-left', 'open-right');
-            });
-
-            if (!isOpen) {
-                // Calculate available space on left and right
-                const rect = wrapper.getBoundingClientRect();
-                const viewportWidth = window.innerWidth;
-                const spaceOnRight = viewportWidth - rect.right;
-                const spaceOnLeft = rect.left;
-                const dropdownWidth = 250; // min-width of dropdown
-
-                // Open to the side with more space, preferring left if both are insufficient
-                if (spaceOnLeft >= dropdownWidth || spaceOnLeft > spaceOnRight) {
-                    list.classList.add('open-left');
-                } else {
-                    list.classList.add('open-right');
-                }
-            }
-        }
-
-        function selectAssignee(uniqueName, displayName) {
-            const btn = document.getElementById('assigneeDropdownBtn');
-            const list = document.getElementById('assigneeDropdownList');
-            btn.textContent = displayName;
-            list.classList.remove('open-left', 'open-right');
-            // Update selected state
-            list.querySelectorAll('.assignee-dropdown-item').forEach(item => item.classList.remove('selected'));
-            event.currentTarget.classList.add('selected');
-            vscode.postMessage({ command: 'assignTo', uniqueName: uniqueName || '' });
-        }
-
-        // Close dropdowns when clicking outside
-        document.addEventListener('click', function(e) {
-            const iterationWrapper = document.getElementById('iterationDropdownWrapper');
-            const areaWrapper = document.getElementById('areaDropdownWrapper');
-            const assigneeWrapper = document.getElementById('assigneeDropdownWrapper');
-
-            if (iterationWrapper && !iterationWrapper.contains(e.target)) {
-                const list = document.getElementById('iterationDropdownList');
-                list.classList.remove('open-left', 'open-right');
-            }
-
-            if (areaWrapper && !areaWrapper.contains(e.target)) {
-                const list = document.getElementById('areaDropdownList');
-                list.classList.remove('open-left', 'open-right');
-            }
-
-            if (assigneeWrapper && !assigneeWrapper.contains(e.target)) {
-                const list = document.getElementById('assigneeDropdownList');
-                list.classList.remove('open-left', 'open-right');
-            }
-        });
-
-        function uploadAttachment() {
-            vscode.postMessage({ command: 'uploadAttachment' });
-        }
-
-        function downloadAttachment(url, name) {
-            vscode.postMessage({ command: 'downloadAttachment', url, name });
-        }
-
-        function deleteAttachment(url) {
-            vscode.postMessage({ command: 'deleteAttachment', url });
-        }
-
-        // Tag Management
-        const existingTags = ${serializeForScript(this._existingTags)};
-        let currentTags = ${serializeForScript(tags ? tags.split(';').map((t: string) => t.trim()).filter((t: string) => t) : [])};
-        let selectedSuggestionIndex = -1;
-
-        function getCurrentTagsString() {
-            return currentTags.join('; ');
-        }
-
-        function updateTagsBackend() {
-            const tagsString = getCurrentTagsString();
-            vscode.postMessage({ command: 'updateTags', tags: tagsString });
-        }
-
-        function removeTag(tagName) {
-            currentTags = currentTags.filter(t => t !== tagName);
-            renderTags();
-            updateTagsBackend();
-        }
-
-        function addTag(tagName) {
-            const trimmed = tagName.trim();
-            if (trimmed && !currentTags.includes(trimmed)) {
-                currentTags.push(trimmed);
-                renderTags();
-                updateTagsBackend();
-            }
-        }
-
-        function renderTags() {
-            const display = document.getElementById('tagsDisplay');
-            const input = document.getElementById('tagInput');
-            const currentValue = input.value;
-
-            display.innerHTML = currentTags.map(tag =>
-                \`<span class="tag-chip-editable">\${escapeHtml(tag)}<button class="tag-remove" onclick="removeTag(\${jsArg(tag)})">×</button></span>\`
-            ).join('') + \`<input type="text" class="tag-input" id="tagInput" placeholder="Add tag..." oninput="handleTagInput()" onkeydown="handleTagKeydown(event)" onfocus="showTagSuggestions()" onblur="hideTagSuggestions()">\`;
-
-            const newInput = document.getElementById('tagInput');
-            newInput.value = currentValue;
-            newInput.focus();
-        }
-
-        function handleTagInput() {
-            const input = document.getElementById('tagInput');
-            const query = input.value.toLowerCase();
-            const suggestions = document.getElementById('tagSuggestions');
-
-            if (!query) {
-                suggestions.innerHTML = existingTags.slice(0, 10).map(tag =>
-                    \`<div class="tag-suggestion-item" onmousedown="selectTag(\${jsArg(tag)})">\${escapeHtml(tag)}</div>\`
-                ).join('');
-            } else {
-                const filtered = existingTags.filter(tag =>
-                    tag.toLowerCase().includes(query) && !currentTags.includes(tag)
-                );
-
-                if (filtered.length > 0) {
-                    suggestions.innerHTML = filtered.slice(0, 10).map(tag =>
-                        \`<div class="tag-suggestion-item" onmousedown="selectTag(\${jsArg(tag)})">\${escapeHtml(tag)}</div>\`
-                    ).join('');
-                } else if (query.length > 0) {
-                    suggestions.innerHTML = \`<div class="tag-suggestion-item" onmousedown="selectTag(\${jsArg(query)})">Create: \${escapeHtml(query)}</div>\`;
-                } else {
-                    suggestions.innerHTML = '';
-                }
-            }
-
-            selectedSuggestionIndex = -1;
-            updateSelectedSuggestion();
-            suggestions.classList.add('show');
-        }
-
-        function handleTagKeydown(event) {
-            const input = document.getElementById('tagInput');
-            const suggestions = document.getElementById('tagSuggestions');
-            const items = suggestions.querySelectorAll('.tag-suggestion-item');
-
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                if (selectedSuggestionIndex >= 0 && items[selectedSuggestionIndex]) {
-                    const tagText = items[selectedSuggestionIndex].textContent;
-                    const tag = tagText.startsWith('Create: ') ? tagText.substring(8) : tagText;
-                    addTag(tag);
-                    input.value = '';
-                    handleTagInput();
-                } else if (input.value.trim()) {
-                    addTag(input.value.trim());
-                    input.value = '';
-                    handleTagInput();
-                }
-            } else if (event.key === 'ArrowDown') {
-                event.preventDefault();
-                if (selectedSuggestionIndex < items.length - 1) {
-                    selectedSuggestionIndex++;
-                    updateSelectedSuggestion();
-                }
-            } else if (event.key === 'ArrowUp') {
-                event.preventDefault();
-                if (selectedSuggestionIndex > 0) {
-                    selectedSuggestionIndex--;
-                    updateSelectedSuggestion();
-                }
-            } else if (event.key === 'Escape') {
-                suggestions.classList.remove('show');
-            } else if (event.key === 'Backspace' && !input.value && currentTags.length > 0) {
-                currentTags.pop();
-                renderTags();
-                updateTagsBackend();
-            }
-        }
-
-        function updateSelectedSuggestion() {
-            const items = document.querySelectorAll('.tag-suggestion-item');
-            items.forEach((item, index) => {
-                if (index === selectedSuggestionIndex) {
-                    item.classList.add('selected');
-                } else {
-                    item.classList.remove('selected');
-                }
-            });
-        }
-
-        function selectTag(tagName) {
-            addTag(tagName);
-            const input = document.getElementById('tagInput');
-            input.value = '';
-            handleTagInput();
-        }
-
-        function showTagSuggestions() {
-            handleTagInput();
-        }
-
-        function hideTagSuggestions() {
-            setTimeout(() => {
-                document.getElementById('tagSuggestions').classList.remove('show');
-            }, 200);
-        }
-
-        function escapeHtml(text) {
-            return String(text ?? '')
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-        }
-
-        // Encode a value as a JS string literal for an inline handler attribute, e.g. onclick="f(\${jsArg(x)})".
-        function jsArg(text) {
-            return escapeHtml(JSON.stringify(String(text ?? '')));
-        }
-    </script>
+    <script nonce="${nonce}" id="work-item-data" type="application/json">${serializeForScript(workItemData)}</script>
+    <script nonce="${nonce}" src="${handlersJsUri}"></script>
+    <script nonce="${nonce}" src="${workItemJsUri}"></script>
 </body>
 </html>`;
     }

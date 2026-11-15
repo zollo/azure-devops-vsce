@@ -27,7 +27,11 @@ export default tseslint.config(
         // Scripts that run inside webviews. They are classic scripts: their top-level functions
         // are globals that the page's data-click (and similar) attributes call by name.
         files: ['media/**/*.js'],
-        languageOptions: { sourceType: 'script', globals: { ...globals.browser, acquireVsCodeApi: 'readonly' } },
+        languageOptions: {
+            sourceType: 'script',
+            // Quill is the vendored rich text editor; bindWebviewHandlers comes from shared/webviewHandlers.js
+            globals: { ...globals.browser, acquireVsCodeApi: 'readonly', Quill: 'readonly', bindWebviewHandlers: 'readonly' }
+        },
         rules: {
             '@typescript-eslint/no-require-imports': 'off',
             '@typescript-eslint/no-unused-vars': ['error', { vars: 'local', args: 'none', caughtErrors: 'none' }]

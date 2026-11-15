@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { log } from '../utils/logger';
-import * as crypto from 'crypto';
+import { getNonce } from '../utils/webviewSecurity';
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
@@ -265,8 +265,4 @@ async function detectRemotes(): Promise<RemoteInfo[]> {
         }
     }
     return remotes;
-}
-
-function getNonce(): string {
-    return crypto.randomBytes(18).toString('base64').replace(/[^A-Za-z0-9]/g, '');
 }
