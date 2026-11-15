@@ -2264,13 +2264,14 @@ export class BoardPanel {
     <div class="board-header">
         <div class="board-title">
             <div class="board-selector">
-                <button class="board-selector-btn" data-click="toggleBoardDropdown">
+                <button class="board-selector-btn" data-click="toggleBoardDropdown" aria-haspopup="listbox" aria-label="Board: ${this._escapeHtml(this.boardName)}. Switch board">
                     <span class="board-icon">${this._getBoardIcon(this.boardName)}</span>
                     <span class="board-name">${this._escapeHtml(this.boardName)}</span>
                 </button>
-                <div class="board-dropdown" id="boardDropdown">
+                <div class="board-dropdown" id="boardDropdown" role="listbox" aria-label="Boards">
                     ${this.availableBoards.map(board => `
                         <div class="board-dropdown-item ${board.id === this.boardId ? 'active' : ''}"
+                             role="option" tabindex="0" aria-selected="${board.id === this.boardId}"
                              data-click="switchBoard" data-click-args='[${jsArg(board.id)}, ${jsArg(board.name)}]'>
                             <span class="board-icon">${this._getBoardIcon(board.name)}</span>
                             <span class="board-name">${this._escapeHtml(board.name)}</span>
@@ -2280,16 +2281,16 @@ export class BoardPanel {
             </div>
         </div>
         <div class="board-actions">
-            <button class="btn icon-btn" data-click="toggleFilterBar" title="Toggle filters (F)" id="filterToggleBtn">
+            <button class="btn icon-btn" data-click="toggleFilterBar" title="Toggle filters (F)" aria-label="Toggle filters" id="filterToggleBtn">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M6 10.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1-.5-.5zm-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5zm-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5z"/></svg>
             </button>
-            <button class="btn icon-btn" data-click="refresh" title="Refresh (R)">
+            <button class="btn icon-btn" data-click="refresh" title="Refresh (R)" aria-label="Refresh">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/></svg>
             </button>
-            <button class="btn icon-btn" data-click="openInBrowser" title="Open in browser">
+            <button class="btn icon-btn" data-click="openInBrowser" title="Open in browser" aria-label="Open in browser">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5z"/><path fill-rule="evenodd" d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0v-5z"/></svg>
             </button>
-            <button class="btn icon-btn" data-click="toggleKeyboardHelp" title="Keyboard shortcuts (?)">?</button>
+            <button class="btn icon-btn" data-click="toggleKeyboardHelp" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" aria-controls="keyboardHelp">?</button>
         </div>
     </div>
 
@@ -2302,7 +2303,7 @@ export class BoardPanel {
                    placeholder="Search by ID or title..."
                    data-input="applyFilters"
                    data-keydown="handleSearchKeydown" data-keydown-args='[{"$ref": "event"}, {"$ref": "el"}]'>
-            <button class="filter-search-clear" data-click="clearSearch">×</button>
+            <button class="filter-search-clear" data-click="clearSearch" aria-label="Clear search">×</button>
         </div>
 
         <div class="filter-divider"></div>
@@ -2414,7 +2415,8 @@ export class BoardPanel {
         </div>
     </div>
 
-    <div class="board-container" id="boardContainer">
+    <div class="board-container" id="boardContainer" role="region" aria-label="${this._escapeHtml(this.boardName)} board" aria-describedby="boardKeyboardHint">
+        <p id="boardKeyboardHint" class="sr-only">Use the arrow keys to move between cards and columns. Enter opens a card, M moves it to another column, and Shift+F10 opens its menu.</p>
         ${columns.map((column, colIndex) => {
             const items = workItems.get(column.name) || [];
             const itemCount = items.length;
@@ -2432,13 +2434,15 @@ export class BoardPanel {
                  data-state-mappings="${this._escapeHtml(JSON.stringify(stateMappings))}"
                  data-limit="${column.itemLimit}"
                  data-index="${colIndex}"
-                 tabindex="0"
+                 role="group"
+                 aria-label="${this._escapeHtml(column.name)} column, ${itemCount} item${itemCount === 1 ? '' : 's'}${column.itemLimit > 0 ? ', limit ' + column.itemLimit : ''}"
+                 tabindex="-1"
                  data-dragover="handleDragOver" data-dragover-args='[{"$ref": "event"}]'
                  data-dragleave="handleDragLeave" data-dragleave-args='[{"$ref": "event"}]'
                  data-drop="handleDrop" data-drop-args='[{"$ref": "event"}]'>
                 <div class="column-header" data-click="toggleColumn" data-click-args='[{"$ref": "parent"}]'>
                     <div class="column-header-left">
-                        <button class="collapse-btn" data-click="toggleColumn" data-click-args='[{"$ref": "column"}]' data-stop>◀</button>
+                        <button class="collapse-btn" data-click="toggleColumn" data-click-args='[{"$ref": "column"}]' data-stop aria-expanded="true" aria-label="Collapse ${this._escapeHtml(column.name)} column"><span aria-hidden="true">◀</span></button>
                         <span class="column-title">${this._escapeHtml(column.name)}</span>
                     </div>
                     <div class="column-header-right">
@@ -2457,28 +2461,28 @@ export class BoardPanel {
                 <div class="add-item-form-container" id="add-form-${this._escapeHtml(column.name).replace(/\s/g, '-')}">
                     <div class="add-item-row">
                         <div class="add-item-type-dropdown" id="add-item-type-dropdown">
-                            <button class="add-item-type-btn" id="add-item-type-btn" data-click="toggleTypeDropdown" data-click-args='[{"$ref": "event"}]' title="${this._escapeHtml(defaultWorkItemType)}">
+                            <button class="add-item-type-btn" id="add-item-type-btn" data-click="toggleTypeDropdown" data-click-args='[{"$ref": "event"}]' title="${this._escapeHtml(defaultWorkItemType)}" aria-label="Work item type: ${this._escapeHtml(defaultWorkItemType)}" aria-haspopup="listbox">
                                 <span class="type-icon">${this._getTypeIcon(defaultWorkItemType)}</span>
                                 <svg class="dropdown-arrow" width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M4 6l4 4 4-4z"/></svg>
                             </button>
                             <div class="add-item-type-menu" id="add-item-type-menu">
                                 ${allWorkItemTypes.map(type => `
-                                    <div class="type-menu-item ${type === defaultWorkItemType ? 'selected' : ''}" data-type="${this._escapeHtml(type)}" data-click="selectWorkItemType" data-click-args='[${jsArg(type)}]' title="${this._escapeHtml(type)}">
+                                    <div class="type-menu-item ${type === defaultWorkItemType ? 'selected' : ''}" role="option" tabindex="0" aria-label="${this._escapeHtml(type)}" aria-selected="${type === defaultWorkItemType}" data-type="${this._escapeHtml(type)}" data-click="selectWorkItemType" data-click-args='[${jsArg(type)}]' title="${this._escapeHtml(type)}">
                                         <span class="type-icon">${this._getTypeIcon(type)}</span>
                                     </div>
                                 `).join('')}
                             </div>
                         </div>
                         <input type="hidden" id="add-item-type-value" value="${this._escapeHtml(defaultWorkItemType)}" />
-                        <input type="text" class="add-item-input" id="add-item-title-input" placeholder="Enter title..."
+                        <input type="text" class="add-item-input" id="add-item-title-input" placeholder="Enter title..." aria-label="New work item title"
                                data-keydown="handleAddKeydown" data-keydown-args='[{"$ref": "event"}, ${jsArg(column.name)}]' />
                         <button class="btn btn-primary add-item-submit" data-click="createItem" data-click-args='[${jsArg(column.name)}]'>Add to top</button>
                     </div>
                 </div>
                 ` : ''}
-                <div class="column-body">
+                <div class="column-body" role="list" aria-label="${this._escapeHtml(column.name)}">
                     ${items.map((item, itemIndex) => this._renderCard(item, colIndex, itemIndex)).join('')}
-                    ${items.length === 0 ? '<div class="empty-column">No items</div>' : ''}
+                    ${items.length === 0 ? '<div class="empty-column" role="listitem">No items</div>' : ''}
                     <div class="drop-placeholder"></div>
                 </div>
             </div>
@@ -2487,80 +2491,81 @@ export class BoardPanel {
     </div>
 
     <!-- Context Menu -->
-    <div class="context-menu" id="contextMenu">
-        <div class="context-menu-item" data-click="contextMenuAction" data-click-args='["open"]'>
-            <span class="icon">📄</span> Open Details
+    <div class="context-menu" id="contextMenu" role="menu" aria-label="Work item actions">
+        <div class="context-menu-item" role="menuitem" tabindex="-1" data-click="contextMenuAction" data-click-args='["open"]'>
+            <span class="icon" aria-hidden="true">📄</span> Open Details
         </div>
-        <div class="context-menu-item" data-click="contextMenuAction" data-click-args='["openBrowser"]'>
-            <span class="icon">🌐</span> Open in Browser
+        <div class="context-menu-item" role="menuitem" tabindex="-1" data-click="contextMenuAction" data-click-args='["openBrowser"]'>
+            <span class="icon" aria-hidden="true">🌐</span> Open in Browser
         </div>
-        <div class="context-menu-separator"></div>
-        <div class="context-menu-item" data-click="contextMenuAction" data-click-args='["assignToMe"]'>
-            <span class="icon">👤</span> Assign to Me
+        <div class="context-menu-separator" role="separator"></div>
+        <div class="context-menu-item" role="menuitem" tabindex="-1" data-click="contextMenuAction" data-click-args='["assignToMe"]'>
+            <span class="icon" aria-hidden="true">👤</span> Assign to Me
         </div>
         <div class="context-menu-item context-menu-submenu">
-            <span class="icon">📊</span> Change State
+            <span class="icon" aria-hidden="true">📊</span> Change State
             <div class="submenu" id="stateSubmenu">
                 ${columns.map(col => {
                     const state = Object.values(col.stateMappings || {})[0] || col.name;
-                    return `<div class="context-menu-item" data-click="contextMenuAction" data-click-args='["changeState", ${jsArg(String(state))}]'>${this._escapeHtml(String(state))}</div>`;
+                    return `<div class="context-menu-item" role="menuitem" tabindex="-1" data-click="contextMenuAction" data-click-args='["changeState", ${jsArg(String(state))}]'>${this._escapeHtml(String(state))}</div>`;
                 }).join('')}
             </div>
         </div>
-        <div class="context-menu-item" data-click="contextMenuAction" data-click-args='["addComment"]'>
-            <span class="icon">💬</span> Add Comment
+        <div class="context-menu-item" role="menuitem" tabindex="-1" data-click="contextMenuAction" data-click-args='["addComment"]'>
+            <span class="icon" aria-hidden="true">💬</span> Add Comment
         </div>
-        <div class="context-menu-separator"></div>
-        <div class="context-menu-item" data-click="contextMenuAction" data-click-args='["createBranch"]'>
-            <span class="icon">🔀</span> Create Branch
+        <div class="context-menu-separator" role="separator"></div>
+        <div class="context-menu-item" role="menuitem" tabindex="-1" data-click="contextMenuAction" data-click-args='["createBranch"]'>
+            <span class="icon" aria-hidden="true">🔀</span> Create Branch
         </div>
-        <div class="context-menu-separator"></div>
-        <div class="context-menu-item" data-click="contextMenuAction" data-click-args='["copyId"]'>
-            <span class="icon">📋</span> Copy ID
+        <div class="context-menu-separator" role="separator"></div>
+        <div class="context-menu-item" role="menuitem" tabindex="-1" data-click="contextMenuAction" data-click-args='["copyId"]'>
+            <span class="icon" aria-hidden="true">📋</span> Copy ID
         </div>
-        <div class="context-menu-item" data-click="contextMenuAction" data-click-args='["copyUrl"]'>
-            <span class="icon">🔗</span> Copy URL
+        <div class="context-menu-item" role="menuitem" tabindex="-1" data-click="contextMenuAction" data-click-args='["copyUrl"]'>
+            <span class="icon" aria-hidden="true">🔗</span> Copy URL
         </div>
     </div>
 
     <!-- Card Menu -->
-    <div class="card-menu" id="cardMenu">
-        <div class="card-menu-item" data-click="cardMenuAction" data-click-args='["open"]'>
+    <div class="card-menu" id="cardMenu" role="menu" aria-label="Card actions">
+        <div class="card-menu-item" role="menuitem" tabindex="-1" data-click="cardMenuAction" data-click-args='["open"]'>
             <img src="https://img.icons8.com/pastel-glyph/128/external-link--v2.png" class="menu-icon" alt="open"> Open
         </div>
-        <div class="card-menu-item" data-click="cardMenuAction" data-click-args='["editTitle"]'>
+        <div class="card-menu-item" role="menuitem" tabindex="-1" data-click="cardMenuAction" data-click-args='["editTitle"]'>
             <img src="https://img.icons8.com/ios/50/edit--v1.png" class="menu-icon" alt="edit"> Edit title
         </div>
-        <div class="card-menu-separator"></div>
-        <div class="card-menu-item" data-click="cardMenuAction" data-click-args='["moveToColumn"]'>
+        <div class="card-menu-separator" role="separator"></div>
+        <div class="card-menu-item" role="menuitem" tabindex="-1" data-click="cardMenuAction" data-click-args='["moveToColumn"]'>
             <img src="https://img.icons8.com/ios/50/resize-horizontal.png" class="menu-icon" alt="move column"> Move to column
         </div>
-        <div class="card-menu-item" data-click="cardMenuAction" data-click-args='["moveToIteration"]'>
+        <div class="card-menu-item" role="menuitem" tabindex="-1" data-click="cardMenuAction" data-click-args='["moveToIteration"]'>
             <img src="https://img.icons8.com/ios/50/resize-horizontal.png" class="menu-icon" alt="move iteration"> Move to iteration
         </div>
-        <div class="card-menu-separator"></div>
-        <div class="card-menu-item" data-click="cardMenuAction" data-click-args='["addTask"]'>
+        <div class="card-menu-separator" role="separator"></div>
+        <div class="card-menu-item" role="menuitem" tabindex="-1" data-click="cardMenuAction" data-click-args='["addTask"]'>
             <img src="https://img.icons8.com/ios/50/plus--v1.png" class="menu-icon" alt="add task"> Add Task
         </div>
-        <div class="card-menu-item" data-click="cardMenuAction" data-click-args='["addTest"]'>
+        <div class="card-menu-item" role="menuitem" tabindex="-1" data-click="cardMenuAction" data-click-args='["addTest"]'>
             <img src="https://img.icons8.com/carbon-copy/100/test-tube.png" class="menu-icon test-icon" alt="add test"> Add Test
         </div>
-        <div class="card-menu-separator"></div>
-        <div class="card-menu-item" data-click="cardMenuAction" data-click-args='["createBranch"]'>
+        <div class="card-menu-separator" role="separator"></div>
+        <div class="card-menu-item" role="menuitem" tabindex="-1" data-click="cardMenuAction" data-click-args='["createBranch"]'>
             <img src="https://img.icons8.com/ios/50/merge-git.png" class="menu-icon" alt="branch"> New branch...
         </div>
-        <div class="card-menu-separator"></div>
-        <div class="card-menu-item danger" data-click="cardMenuAction" data-click-args='["delete"]'>
+        <div class="card-menu-separator" role="separator"></div>
+        <div class="card-menu-item danger" role="menuitem" tabindex="-1" data-click="cardMenuAction" data-click-args='["delete"]'>
             <img src="https://img.icons8.com/ios/50/trash--v1.png" class="menu-icon" alt="delete"> Delete
         </div>
     </div>
 
     <!-- Keyboard Help -->
-    <div class="keyboard-help" id="keyboardHelp">
+    <div class="keyboard-help" id="keyboardHelp" role="note" aria-label="Keyboard shortcuts">
         <strong>Keyboard Shortcuts:</strong><br>
         <kbd>↑</kbd><kbd>↓</kbd> Navigate cards &nbsp;
         <kbd>←</kbd><kbd>→</kbd> Navigate columns<br>
         <kbd>M</kbd> Move mode &nbsp;
+        <kbd>Shift</kbd>+<kbd>F10</kbd> Card menu &nbsp;
         <kbd>Enter</kbd> Open details &nbsp;
         <kbd>R</kbd> Refresh<br>
         <kbd>F</kbd> Toggle filters &nbsp;
@@ -2568,7 +2573,8 @@ export class BoardPanel {
         <kbd>Esc</kbd> Cancel
     </div>
 
-    <div class="toast" id="toast"></div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="sr-only" id="srStatus" role="status" aria-live="assertive"></div>
 
     <script nonce="${nonce}" id="board-data" type="application/json">${serializeForScript(boardData)}</script>
     <script nonce="${nonce}" src="${handlersJsUri}"></script>
@@ -2612,14 +2618,17 @@ export class BoardPanel {
              data-title="${this._escapeHtml(item.title)}"
              data-type="${this._escapeHtml(item.type)}"
              data-priority="${item.priority || ''}"
-             data-assignee="${item.assignedTo?.uniqueName || ''}"
-             data-assignee-name="${item.assignedTo?.displayName || ''}"
+             data-assignee="${this._escapeHtml(item.assignedTo?.uniqueName || '')}"
+             data-assignee-name="${this._escapeHtml(item.assignedTo?.displayName || '')}"
              data-state="${this._escapeHtml(item.state)}"
-             data-tags="${item.tags || ''}"
+             data-tags="${this._escapeHtml(item.tags || '')}"
              data-areapath="${this._escapeHtml(item.areaPath || '')}"
              data-iterationpath="${this._escapeHtml(item.iterationPath || '')}"
              data-effort="${effort}"
              ${cardStyle}
+             role="listitem"
+             aria-label="${this._escapeHtml(`${item.type} ${item.id}: ${item.title}. ${item.state}. ${item.assignedTo?.displayName || 'Unassigned'}${item.effort ? '. Effort ' + item.effort : ''}`)}"
+             aria-describedby="boardKeyboardHint"
              tabindex="0"
              data-dragstart="handleDragStart" data-dragstart-args='[{"$ref": "event"}, ${item.id}]'
              data-dragend="handleDragEnd" data-dragend-args='[{"$ref": "event"}]'
@@ -2633,13 +2642,13 @@ export class BoardPanel {
                         <span class="card-title" data-dblclick="editCardTitle" data-dblclick-args='[{"$ref": "el"}, ${item.id}]' data-stop>${this._escapeHtml(item.title)}</span>
                     </div>
                 </div>
-                <button class="card-menu-btn" data-click="showCardMenu" data-click-args='[{"$ref": "event"}, ${item.id}]' data-stop title="More options">⋯</button>
+                <button class="card-menu-btn" data-click="showCardMenu" data-click-args='[{"$ref": "event"}, ${item.id}]' data-stop title="More options" aria-label="More options for ${item.id}" aria-haspopup="menu"><span aria-hidden="true">⋯</span></button>
             </div>
             <div class="card-status">
                 <span class="status-dot ${stateClass}"></span>
                 <span class="status-label">${this._escapeHtml(item.state)}</span>
             </div>
-            <div class="card-assignee" data-click="changeCardAssignee" data-click-args='[${item.id}, ${jsArg(item.assignedTo?.displayName || '')}]' data-stop>
+            <div class="card-assignee" role="button" tabindex="-1" aria-label="Change assignee" data-click="changeCardAssignee" data-click-args='[${item.id}, ${jsArg(item.assignedTo?.displayName || '')}]' data-stop>
                 <div class="card-avatar ${!item.assignedTo ? 'unassigned' : ''}">${initials}</div>
                 <span class="card-assignee-name ${!item.assignedTo ? 'unassigned-text' : ''}">${item.assignedTo ? this._escapeHtml(item.assignedTo.displayName) : ''}</span>
             </div>
@@ -2685,6 +2694,8 @@ export class BoardPanel {
             // Each indicator toggles its own type-specific checklist
             indicators.push(`
                 <div class="child-indicator-item ${allClosed ? 'completed' : ''}"
+                     role="button" tabindex="0" aria-expanded="false"
+                     aria-label="${this._escapeHtml(type)}: ${closedChildren} of ${totalChildren} done. Show checklist"
                      data-click="toggleChildChecklist" data-click-args='[${item.id}, ${jsArg(typeId)}]' data-stop
                      title="Click to expand/collapse ${this._escapeHtml(type)} checklist">
                     ${childIcon}

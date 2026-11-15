@@ -1041,18 +1041,18 @@ export class WorkItemPanel {
             <span class="type-icon" title="${this.escapeHtml(type)}">${this.getWorkItemTypeIcon(type)}</span>
             <span class="work-item-id">#${this._workItem.id}</span>
             <span class="title-display">${title}</span>
-            <span class="state-pill" data-click="scrollToState">${this.escapeHtml(state)}</span>
+            <button type="button" class="state-pill" data-click="scrollToState" aria-label="State: ${this.escapeHtml(state)}. Change state">${this.escapeHtml(state)}</button>
             <div class="quick-actions">
                 ${assignedTo === 'Unassigned' ? '<button class="btn-icon" data-click="assignToMe">Assign to me</button>' : ''}
-                <button class="btn-icon" data-click="toggleMenu" data-click-args='[{"$ref": "event"}]'>⋯</button>
-                <div id="menuDropdown" class="menu-dropdown" style="display: none;">
-                    <div class="menu-item" data-click="menuOpenInBrowser">
+                <button class="btn-icon" id="menuButton" data-click="toggleMenu" data-click-args='[{"$ref": "event"}]' aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="menuDropdown"><span aria-hidden="true">⋯</span></button>
+                <div id="menuDropdown" class="menu-dropdown" role="menu" aria-label="More actions" style="display: none;">
+                    <div class="menu-item" role="menuitem" tabindex="-1" data-click="menuOpenInBrowser">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 8px;">
                             <path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm7.5-6.923c-.67.204-1.335.82-1.887 1.855A7.97 7.97 0 0 0 5.145 4H7.5V1.077zM4.09 4a9.267 9.267 0 0 1 .64-1.539 6.7 6.7 0 0 1 .597-.933A7.025 7.025 0 0 0 2.255 4H4.09zm-.582 3.5c.03-.877.138-1.718.312-2.5H1.674a6.958 6.958 0 0 0-.656 2.5h2.49zM4.847 5a12.5 12.5 0 0 0-.338 2.5H7.5V5H4.847zM8.5 5v2.5h2.99a12.495 12.495 0 0 0-.337-2.5H8.5zM4.51 8.5a12.5 12.5 0 0 0 .337 2.5H7.5V8.5H4.51zm3.99 0V11h2.653c.187-.765.306-1.608.338-2.5H8.5zM5.145 12c.138.386.295.744.468 1.068.552 1.035 1.218 1.65 1.887 1.855V12H5.145zm.182 2.472a6.696 6.696 0 0 1-.597-.933A9.268 9.268 0 0 1 4.09 12H2.255a7.024 7.024 0 0 0 3.072 2.472zM3.82 11a13.652 13.652 0 0 1-.312-2.5h-2.49c.062.89.291 1.733.656 2.5H3.82zm6.853 3.472A7.024 7.024 0 0 0 13.745 12H11.91a9.27 9.27 0 0 1-.64 1.539 6.688 6.688 0 0 1-.597.933zM8.5 12v2.923c.67-.204 1.335-.82 1.887-1.855.173-.324.33-.682.468-1.068H8.5zm3.68-1h2.146c.365-.767.594-1.61.656-2.5h-2.49a13.65 13.65 0 0 1-.312 2.5zm2.802-3.5a6.959 6.959 0 0 0-.656-2.5H12.18c.174.782.282 1.623.312 2.5h2.49zM11.27 2.461c.247.464.462.98.64 1.539h1.835a7.024 7.024 0 0 0-3.072-2.472c.218.284.418.598.597.933zM10.855 4a7.966 7.966 0 0 0-.468-1.068C9.835 1.897 9.17 1.282 8.5 1.077V4h2.355z"/>
                         </svg>
                         Open in Browser
                     </div>
-                    <div class="menu-item" data-click="menuRefresh">
+                    <div class="menu-item" role="menuitem" tabindex="-1" data-click="menuRefresh">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 8px;">
                             <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
                             <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
@@ -1066,19 +1066,19 @@ export class WorkItemPanel {
         <div class="card details-card">
             <div class="card-title">Details</div>
             <div class="form-group">
-                <label>Title</label>
+                <label for="title">Title</label>
                 <input type="text" id="title" value="${title}" data-blur="saveTitleOnBlur">
             </div>
             <div class="form-group">
-                <label>Description</label>
-                <div id="descriptionDisplay" class="description-display" data-click="showDescriptionEditor" style="min-height: 40px; cursor: text; padding: 12px;">${description || '<span style="color: var(--vscode-input-placeholderForeground);">Click to add description...</span>'}</div>
+                <label id="descriptionLabel">Description</label>
+                <div id="descriptionDisplay" class="description-display" role="button" tabindex="0" aria-labelledby="descriptionLabel" aria-description="Edit" data-click="showDescriptionEditor" style="min-height: 40px; cursor: text; padding: 12px;">${description || '<span style="color: var(--vscode-input-placeholderForeground);">Click to add description...</span>'}</div>
                 <div id="descriptionEditorContainer">
                     <div id="descriptionEditor" style="background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 6px;"></div>
                 </div>
             </div>
             <div class="form-group">
-                <label>Acceptance Criteria</label>
-                <div id="acceptanceCriteriaDisplay" class="description-display" data-click="showAcceptanceCriteriaEditor" style="min-height: 40px; cursor: text; padding: 12px;">${acceptanceCriteria || '<span style="color: var(--vscode-input-placeholderForeground);">Click to add acceptance criteria...</span>'}</div>
+                <label id="acceptanceCriteriaLabel">Acceptance Criteria</label>
+                <div id="acceptanceCriteriaDisplay" class="description-display" role="button" tabindex="0" aria-labelledby="acceptanceCriteriaLabel" aria-description="Edit" data-click="showAcceptanceCriteriaEditor" style="min-height: 40px; cursor: text; padding: 12px;">${acceptanceCriteria || '<span style="color: var(--vscode-input-placeholderForeground);">Click to add acceptance criteria...</span>'}</div>
                 <div id="acceptanceCriteriaEditorContainer">
                     <div id="acceptanceCriteriaEditor" style="background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 6px;"></div>
                 </div>
@@ -1130,8 +1130,8 @@ export class WorkItemPanel {
                 </div>
                 <div class="meta-item">
                     <span class="meta-label">Priority</span>
-                    <div class="priority-select-wrapper">
-                        ${[1, 2, 3, 4].map(p => `<button class="priority-btn p${p} ${priority === p ? 'active' : ''}" data-click="updatePriority" data-click-args='[${p}]'>${p}</button>`).join('')}
+                    <div class="priority-select-wrapper" role="group" aria-label="Priority">
+                        ${[1, 2, 3, 4].map(p => `<button class="priority-btn p${p} ${priority === p ? 'active' : ''}" aria-label="Priority ${p}" aria-pressed="${priority === p}" data-click="updatePriority" data-click-args='[${p}]'>${p}</button>`).join('')}
                     </div>
                 </div>
                 <div class="meta-item">
@@ -1168,7 +1168,7 @@ export class WorkItemPanel {
                     <span class="meta-label">Tags</span>
                     <div class="tags-editor-container">
                         <div class="tags-display" id="tagsDisplay">
-                            ${tags ? tags.split(';').map(t => `<span class="tag-chip-editable">${this.escapeHtml(t.trim())}<button class="tag-remove" data-click="removeTag" data-click-args='[${jsArg(t.trim())}]'>×</button></span>`).join('') : ''}
+                            ${tags ? tags.split(';').map(t => `<span class="tag-chip-editable">${this.escapeHtml(t.trim())}<button class="tag-remove" data-click="removeTag" data-click-args='[${jsArg(t.trim())}]' aria-label="Remove tag ${this.escapeHtml(t.trim())}">×</button></span>`).join('') : ''}
                             <input type="text" class="tag-input" id="tagInput" placeholder="Add tag..." data-input="handleTagInput" data-keydown="handleTagKeydown" data-keydown-args='[{"$ref": "event"}]' data-focus="showTagSuggestions" data-blur="hideTagSuggestions">
                         </div>
                         <div class="tag-suggestions" id="tagSuggestions"></div>
@@ -1243,8 +1243,8 @@ export class WorkItemPanel {
                             <div class="attachment-meta">${att.resourceSize ? this.formatFileSize(att.resourceSize) : ''}${att.comment ? ' • ' + this.escapeHtml(att.comment) : ''}</div>
                         </div>
                         <div class="attachment-actions">
-                            <button class="attachment-btn" data-click="downloadAttachment" data-click-args='[${jsArg(att.url)}, ${jsArg(att.name)}]' title="Download">↓</button>
-                            <button class="attachment-btn delete" data-click="deleteAttachment" data-click-args='[${jsArg(att.url)}]' title="Remove">×</button>
+                            <button class="attachment-btn" data-click="downloadAttachment" data-click-args='[${jsArg(att.url)}, ${jsArg(att.name)}]' title="Download" aria-label="Download ${this.escapeHtml(att.name)}">↓</button>
+                            <button class="attachment-btn delete" data-click="deleteAttachment" data-click-args='[${jsArg(att.url)}]' title="Remove" aria-label="Remove ${this.escapeHtml(att.name)}">×</button>
                         </div>
                     </div>
                 `).join('')}
@@ -1256,8 +1256,8 @@ export class WorkItemPanel {
 
         <div class="card" id="stateSection">
             <div class="card-title">Change State</div>
-            <div class="state-pills">
-                ${stateOptions.map(s => `<button class="state-option ${s === state ? 'active' : ''}" data-click="changeState" data-click-args='[${jsArg(s)}]'>${this.escapeHtml(s)}</button>`).join('')}
+            <div class="state-pills" role="group" aria-label="State">
+                ${stateOptions.map(s => `<button class="state-option ${s === state ? 'active' : ''}" aria-pressed="${s === state}" data-click="changeState" data-click-args='[${jsArg(s)}]'>${this.escapeHtml(s)}</button>`).join('')}
             </div>
         </div>
 
@@ -1283,8 +1283,8 @@ export class WorkItemPanel {
                             <div class="timeline-header">
                                 <span class="timeline-author">${this.escapeHtml(c.createdBy?.displayName || 'Unknown')} <span style="text-decoration: underline; font-weight: normal;">commented ${this.formatRelativeTime(c.createdDate)}</span></span>
                                 <div class="comment-actions">
-                                    <button class="comment-action-btn" data-click="editComment" data-click-args='[${c.id}]' title="Edit">✏️</button>
-                                    <button class="comment-action-btn" data-click="deleteComment" data-click-args='[${c.id}]' title="Delete">🗑️</button>
+                                    <button class="comment-action-btn" data-click="editComment" data-click-args='[${c.id}]' title="Edit" aria-label="Edit comment"><span aria-hidden="true">✏️</span></button>
+                                    <button class="comment-action-btn" data-click="deleteComment" data-click-args='[${c.id}]' title="Delete" aria-label="Delete comment"><span aria-hidden="true">🗑️</span></button>
                                 </div>
                             </div>
                             <div class="timeline-text" id="comment-${c.id}" style="word-wrap: break-word;">${sanitizeRichText(c.text || '')}</div>

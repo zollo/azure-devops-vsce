@@ -157,9 +157,7 @@ test('narrow tables shrink the assignee, then set columns aside, but always keep
 });
 
 test('the layout and sort functions run on their own, as the webview loads them', () => {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
     const layout = new Function(`return (${layoutForWidth.toString()})`)();
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
     const compare = new Function(`return (${compareSortKeys.toString()})`)();
     assert.deepEqual(layout(WORK_ITEM_COLUMNS, ['id', 'title'], 300, 32).shown, ['id', 'title']);
     assert.equal(compare('2', '10', 'number', false) < 0, true);

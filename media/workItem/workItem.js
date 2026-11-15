@@ -108,8 +108,33 @@ function hideAcceptanceCriteriaEditor() {
 function toggleMenu(event) {
     event.stopPropagation();
     const menu = document.getElementById('menuDropdown');
-    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+    const open = menu.style.display === 'none';
+    menu.style.display = open ? 'block' : 'none';
+    const button = document.getElementById('menuButton');
+    if (button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+        const first = menu.querySelector('[role="menuitem"]');
+        if (first) first.focus();
+    }
 }
+
+// Arrow keys move through the open menu; Escape closes it and returns to the menu button
+document.addEventListener('keydown', function(event) {
+    const menu = document.getElementById('menuDropdown');
+    if (!menu || menu.style.display === 'none' || !menu.contains(event.target)) return;
+    const items = Array.from(menu.querySelectorAll('[role="menuitem"]'));
+    const index = items.indexOf(event.target);
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        items[(index + step + items.length) % items.length].focus();
+    } else if (event.key === 'Escape' || event.key === 'Tab') {
+        if (event.key === 'Escape') event.preventDefault();
+        hideMenu();
+        const button = document.getElementById('menuButton');
+        if (button && event.key === 'Escape') button.focus();
+    }
+});
 
 function menuOpenInBrowser() {
     openInBrowser();
@@ -123,6 +148,8 @@ function menuRefresh() {
 
 function hideMenu() {
     document.getElementById('menuDropdown').style.display = 'none';
+    const button = document.getElementById('menuButton');
+    if (button) button.setAttribute('aria-expanded', 'false');
 }
 
 document.addEventListener('click', function() {
@@ -447,7 +474,12 @@ function assignToMe() {
 }
 
 function scrollToState() {
-    document.getElementById('stateSection').scrollIntoView({ behavior: 'smooth' });
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const section = document.getElementById('stateSection');
+    section.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth' });
+    // Move focus with the scroll so keyboard users land on the state buttons
+    const current = section.querySelector('.state-option.active') || section.querySelector('.state-option');
+    if (current) current.focus({ preventScroll: true });
 }
 
 function openLinkedItem(id) {
@@ -464,8 +496,11 @@ function updateAssignee() {
 
 function updatePriority(priority) {
     console.log('updatePriority called:', priority);
-    document.querySelectorAll('.priority-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelector('.priority-btn.p' + priority).classList.add('active');
+    document.querySelectorAll('.priority-btn').forEach(btn => {
+        const on = btn.classList.contains('p' + priority);
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
     vscode.postMessage({ command: 'updateField', field: 'Microsoft.VSTS.Common.Priority', value: priority });
 }
 
