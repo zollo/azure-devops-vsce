@@ -135,6 +135,11 @@ jobs:
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qxF "$VSIX"; then
               echo "::notice::Release $TAG already has $VSIX; reusing it."
+            elif [ "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.immutable')" = "true" ]; then
+              # A release published while "immutable releases" was on stays locked after the
+              # setting is turned off, and its tag can never be reused, so release a new version.
+              echo "::error::Release $TAG is immutable and has no $VSIX, so it can't be attached. Turn off immutable releases in the repository settings and release the next version instead."
+              exit 1
             else
               echo "::notice::Release $TAG exists without $VSIX; attaching it."
               gh release upload "$TAG" "$VSIX" --repo "$GITHUB_REPOSITORY"
